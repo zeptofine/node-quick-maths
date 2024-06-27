@@ -12,7 +12,7 @@ website = "https://github.com/zeptofine/NodeQuickMaths"
 
 # Optional list defined by Blender and server, see:
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
-tags = ["Node", "Pipeline", "User Interface", "Geometry Nodes", ]
+tags = ["Node", "Pipeline", "User Interface"]
 
 blender_version_min = "4.2.0"
 # Optional: maximum supported Blender version
@@ -20,10 +20,6 @@ blender_version_min = "4.2.0"
 
 # License conforming to https://spdx.org/licenses/ (use "SPDX: prefix)
 # https://docs.blender.org/manual/en/dev/extensions/licenses.html
-license = [
-  "SPDX:GPL-3.0-or-later",
-]
+license = ["SPDX:GPL-3.0-or-later"]
 # Optional: required by some licenses.
-copyright = [
-  "2023-2024 Erin MacDonald",
-]
+copyright = ["2023-2024 Erin MacDonald"]
