@@ -26,7 +26,6 @@ BAD_NODES = (
     ast.Await,
     ast.Yield,
     ast.YieldFrom,
-    ast.Compare,
     ast.FormattedValue,
     ast.JoinedStr,
     ast.Attribute,
@@ -52,7 +51,7 @@ CALLS = {  # Function inputs in python, names Blender
     "max": ((2,), "MAXIMUM"),  # (x, y)
     # LESS_THAN, GREATER_THAN have dedicated operators
     "sign": ((1,), "SIGN"),  # (x), SIGN
-    "cmp": ((3,), "COMPARE"),  # (x, y) > c
+    "cmp": ((3,), "COMPARE"),  # (x, y, z)
     "smin": ((3,), "SMOOTH_MIN"),  # (x, y, z)
     "smax": ((3,), "SMOOTH_MAX"),  # (x, y, z)
     # -------
@@ -174,6 +173,27 @@ class Operation:
                 return Operation(
                     name="MULTIPLY",
                     inputs=[Operation.parse(e.operand), -1],
+                )
+
+        if isinstance(e, ast.Compare):
+            if isinstance(e.ops[0], (ast.Gt, ast.GtE)):
+                return Operation(
+                    name="GREATER_THAN",
+                    inputs=[Operation.parse(e.left), Operation.parse(e.comparators[0])],
+                )
+            elif isinstance(e.ops[0], (ast.Lt, ast.LtE)):
+                return Operation(
+                    name="LESS_THAN",
+                    inputs=[Operation.parse(e.left), Operation.parse(e.comparators[0])],
+                )
+            elif isinstance(e.ops[0], ast.Eq):  # Opinion
+                return Operation(
+                    name="COMPARE",
+                    inputs=[
+                        Operation.parse(e.left),
+                        Operation.parse(e.comparators[0]),
+                        0.5,
+                    ],
                 )
 
         if isinstance(e, ast.Call):
