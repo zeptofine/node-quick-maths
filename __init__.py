@@ -1,10 +1,10 @@
 import ast
-from dataclasses import dataclass
 import traceback
+from dataclasses import dataclass
+from pprint import pprint
 from typing import Self, Set
 
 import bpy
-from bpy.props import BoolProperty
 from bpy.types import Context, Event
 
 
@@ -220,64 +220,61 @@ class Tree:
 def create_nodes(
     nt: bpy.types.NodeTree,
     parent: Operation,
-    offset=(0, 0),
 ) -> tuple[
     bpy.types.ShaderNodeMath,  # parent
-    tuple[tuple[int, int], tuple[int, int]],  # node bounds
+    list[list[bpy.types.ShaderNodeMath]],  # child layers
     list[tuple[str, bpy.types.NodeInputs, int]],
 ]:
     """
     Creates nodes. returns a list of tuples of
     (
-        variable name,
-        bounds of (topleft, bottomright),
+        toplevel node,
+        subtrees
         input socket
     )
     """
     parent_node: bpy.types.ShaderNodeMath = nt.nodes.new("ShaderNodeMath")
     parent_node.operation = parent.name
 
-    # I'll be honest i just tweaked the offset stuff until it worked right
-    lefttop = offset
-    rightbottom = (lefttop[0] + parent_node.width, lefttop[1] - parent_node.height)
-
     oinputs = []
+
+    children: list[bpy.types.ShaderNodeMath] = []
+    # [
+    #     [                    child1,                                        child2                     ],
+    #     [        child1.1,               child1.2,              child2.1,               child2.2       ],
+    #     [child1.1.1, child1.1.2, child1.2.1, child1.2.2, child2.1.1, child2.1.2, child2.2.1, child2.2.2],
+    # ]
+    layers: list[list[bpy.types.ShaderNodeMath]] = []
 
     for idx, child in enumerate(parent.inputs):
         if isinstance(child, Operation):
-            node, bounds, inputs = create_nodes(
+            node, sublayers, inputs = create_nodes(
                 nt,
                 child,
-                offset=(lefttop[0], lefttop[1] - idx * (parent_node.height + 60)),
             )
             oinputs.extend(inputs)
             nt.links.new(node.outputs[0], parent_node.inputs[idx])
 
-            # update the bounds of the total tree
-            lefttop = (max(lefttop[0], bounds[0][0]), max(lefttop[1], bounds[0][1]))
-            rightbottom = (
-                max(rightbottom[0], bounds[1][0]),
-                min(rightbottom[1], bounds[1][1]),
-            )
+            # add each layer to the tree
+            if sublayers:
+                for idx, layer in enumerate(sublayers):
+                    if len(layers) <= idx:
+                        layers.append([])
+
+                    layers[idx].extend(layer)
+
+            # add the node to children
+            children.append(node)
 
         elif isinstance(child, str):  # add it to the oinputs
             oinputs.append((child, parent_node.inputs[idx]))
         else:
             parent_node.inputs[idx].default_value = child
 
-    # use the topleft and bottomright to update the parent_node's location,
-    # which should be  to the top-right of the children
-    location = (
-        rightbottom[0] + parent_node.width + 60,  # x
-        # rightbottom[0],
-        lefttop[1],
-    )
-    parent_node.location = location
+    if children:
+        layers.insert(0, children)
 
-    # update the bound
-    rightbottom = (max(location[0], rightbottom[0]), max(location[1], rightbottom[1]))
-
-    return parent_node, (lefttop, rightbottom), oinputs
+    return parent_node, layers, oinputs
 
 
 class ComposeNodeTree(bpy.types.Operator):
@@ -314,27 +311,44 @@ class ComposeNodeTree(bpy.types.Operator):
         offset = (space_data.cursor_location[0], space_data.cursor_location[1])
         tree = self.tree
 
-        node, bounds, inputs = create_nodes(
-            node_tree, tree.toplevel_operation, offset=offset
+        sublayers: list[list[bpy.types.ShaderNodeMath]]
+        node, sublayers, inputs = create_nodes(
+            node_tree,
+            tree.toplevel_operation,
         )
 
-        vars = {}
+        sublayers.insert(0, [node])
 
         # Create the new variables as Value nodes
+        vars = {}
         for idx, variable in enumerate(tree.variables):  # create a Value
             node: bpy.types.ShaderNodeValue = node_tree.nodes.new("ShaderNodeValue")
             node.label = variable
             vars[variable] = node
 
-            # using the bounds, place the variables to the left of the tree
-            node.location = (
-                bounds[0][0] - 40,
-                bounds[0][1] - idx * (node.height + 40),
-            )
-
         # Connect the Value nodes to the corresponding sockets
         for variable, input in inputs:
             node_tree.links.new(vars[variable].outputs[0], input)
+
+        sublayers.append(list(vars.values()))
+
+        height_margin = 60
+        width_margin = 20
+        # loop through every layer in the subtrees, move them to the correct location
+        for l_idx, layer in enumerate(sublayers):
+            # calculate the total height of the layer
+            height = width = 0
+            for node in layer:
+                height += node.height + height_margin
+                width += node.width + width_margin
+
+            # move the nodes
+            for n_idx, node in enumerate(layer):
+                position = (
+                    (offset[0] - (node.width + width_margin) * l_idx),
+                    (offset[1] - (node.height + height_margin) * n_idx),
+                )
+                node.location = position
 
         bpy.ops.node.translate_attach_remove_on_cancel("INVOKE_DEFAULT")
 
@@ -380,12 +394,6 @@ class ComposeNodeTree(bpy.types.Operator):
 
 class Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
-
-    enable_button: BoolProperty(
-        name="Quick Access Button",
-        description="Enable quick access buttons for switching between different node editors",
-        default=True,
-    )  # type: ignore
 
     def draw(self, context):
         layout = self.layout
