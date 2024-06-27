@@ -82,8 +82,8 @@ CALLS = {  # Function inputs in python, names Blender
     "tanh": ((1,), "TANH"),  # (x)
     # -------
     # Conversion
-    "rad": (1,),  # (x), RADIANS
-    "deg": (1,),  # (x), DEGREES
+    "rad": ((1,), "RADIANS"),  # (x)
+    "deg": ((1,), "DEGREES"),  # (x)
 }
 
 BASIC_OPS = {
