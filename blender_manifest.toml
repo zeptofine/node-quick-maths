@@ -1,14 +1,14 @@
 schema_version = "1.0.0"
 
 id = "node_quick_maths"
-version = "1.0.0"
+version = "1.0.1"
 name = "Node Quick Maths"
 tagline = "A fast way to make long math chains in Shader nodes"
 maintainer = "Erin MacDonald <zeptofine@gmail.com>"
 type = "add-on"
 
 # link to documentation, support, source files, etc
-website = "https://github.com/zeptofine/NodeQuickMaths"
+website = "https://github.com/zeptofine/node-quick-maths"
 
 # Optional list defined by Blender and server, see:
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
