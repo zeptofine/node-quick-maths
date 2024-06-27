@@ -1,0 +1,4 @@
+﻿*.pyc
+.vscode/
+dist/
+node_quick_maths-1.0.0.zip
