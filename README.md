@@ -9,8 +9,16 @@ This extension creates a dialogue that makes it simple to create long chains of 
 
 ### Default Keyboard Shortcut - Ctrl + M
 
-In the text box that appears, type in a mathematical expression that you want to evaluate. For example, 1+2*3. 
-Accept the dialogue and the tree will be created with math nodes.
+In the text box that appears, type in a mathematical expression that you want to evaluate. 
+
+For example, sin(x + 64) % (y ** 14 + 10). 
+
+![compose dialogue demo](<images/Screenshot 2024-06-26 221534.png>)
+
+Accept the dialogue and a node tree will be generated with math nodes.
+
+![compose result demo](<images/Screenshot 2024-06-26 221619.png>)
+
 
 Mathematical operators you would expect to work are supported, including:
 - Addition, Subtraction, Multiplication, Division, Power: + - * / **

@@ -15,7 +15,6 @@ def convert_expression(s: str) -> ast.Module:
 BAD_NODES = (
     ast.BoolOp,
     ast.NamedExpr,
-    ast.UnaryOp,
     ast.Lambda,
     ast.IfExp,
     ast.Dict,
@@ -168,6 +167,15 @@ class Operation:
             else:
                 raise NotImplementedError(f"Unhandled operation {op}")
 
+        if isinstance(e, ast.UnaryOp) and isinstance(e.op, ast.USub):
+            if isinstance(e.operand, ast.Constant):
+                return -e.operand.value
+            else:
+                return Operation(
+                    name="MULTIPLY",
+                    inputs=[Operation.parse(e.operand), -1],
+                )
+
         if isinstance(e, ast.Call):
             inputs = []
             for arg in e.args:
@@ -186,13 +194,13 @@ class Operation:
 
         raise NotImplementedError(f"Unhandled expression {ast.dump(e, indent=4)}")
 
-    def variables(self) -> list[VARIABLE_NAME]:
-        vars: list[VARIABLE_NAME] = []
+    def variables(self) -> set[VARIABLE_NAME]:
+        vars: set[VARIABLE_NAME] = set()
         for input in self.inputs:
             if isinstance(input, Operation):
-                vars.extend(input.variables())
+                vars.update(input.variables())
             elif isinstance(input, VARIABLE_NAME):
-                vars.append(input)
+                vars.add(input)
         return vars
 
 
