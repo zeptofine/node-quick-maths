@@ -58,10 +58,10 @@ CALLS = {  # Function inputs in python, names Blender
     "smax": ((3,), "SMOOTH_MAX"),  # (x, y, z)
     # -------
     # Rounding
-    "round": ((1, 2), "ROUND"),  # (x)
+    "round": ((1,), "ROUND"),  # (x)
     "floor": ((1,), "FLOOR"),  # (x)
     "ceil": ((1,), "CEIL"),  # (x)
-    "truncate": ((1,), "TRUNC"),  # (x)
+    "trunc": ((1,), "TRUNC"),  # (x)
     "int": ((1,), "TRUNC"),  # alias for truncate
     "frac": ((1,), "FRACT"),  # (x)
     # MODULO has a dedicated operator
@@ -74,10 +74,10 @@ CALLS = {  # Function inputs in python, names Blender
     "sin": ((1,), "SINE"),  # (x)
     "cos": ((1,), "COSINE"),  # (x)
     "tan": ((1,), "TANGENT"),  # (x)
-    "arcsin": ((1,), "ARCSINE"),  # (x)
-    "arccos": ((1,), "ARCCOSINE"),  # (x)
-    "arctan": ((1,), "ARCTANGENT"),  # (x)
-    "arctan2": ((2,), "ARCTAN2"),  # (x, y)
+    "asin": ((1,), "ARCSINE"),  # (x)
+    "acos": ((1,), "ARCCOSINE"),  # (x)
+    "atan": ((1,), "ARCTANGENT"),  # (x)
+    "atan2": ((2,), "ARCTAN2"),  # (x, y)
     "sinh": ((1,), "SINH"),  # (x)
     "cosh": ((1,), "COSH"),  # (x)
     "tanh": ((1,), "TANH"),  # (x)
