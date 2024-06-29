@@ -13,12 +13,11 @@ In the text box that appears, type in a mathematical expression that you want to
 
 For example, sin(x + 64) % (y ** 14 + 10). 
 
-![compose dialogue demo](<images/Screenshot 2024-06-26 221534.png>)
+![compose dialogue demo](<images/Screenshot 2024-06-29 190334.png>)
 
 Accept the dialogue and a node tree will be generated with math nodes.
 
-![compose result demo](<images/Screenshot 2024-06-26 221619.png>)
-
+![compose result demo](<images/Screenshot 2024-06-29 190342.png>)
 
 Mathematical operators you would expect to work are supported, including:
 - Addition, Subtraction, Multiplication, Division, Power: + - * / **
@@ -26,6 +25,8 @@ Mathematical operators you would expect to work are supported, including:
 - Modulo: %
 
 And all other mathematical functions in the Math node is supported.
+<details>
+<summary>Math Functions</summary>
 - Logarithm: log(x[, base])
 - Square Root: sqrt(x)
 - Abs: abs(x)
@@ -60,6 +61,9 @@ And all other mathematical functions in the Math node is supported.
 ### Conversion
 - To Radians: rad(degx)
 - To Degrees: deg(radx)
+
+</details>
+
 
 
 
