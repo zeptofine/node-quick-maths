@@ -29,6 +29,8 @@ Mathematical operators you would expect to work are supported, including:
 And all other mathematical functions in the Math node is supported.
 <details>
 <summary>Math Functions</summary>
+
+  
 - Logarithm: log(x[, base])
 - Square Root: sqrt(x)
 - Abs: abs(x)
@@ -63,7 +65,6 @@ And all other mathematical functions in the Math node is supported.
 ### Conversion
 - To Radians: rad(degx)
 - To Degrees: deg(radx)
-
 </details>
 
 
@@ -74,7 +75,6 @@ And all other mathematical functions in the Math node is supported.
 To install the node-quick-maths extension, you must have Blender 4.2+ and have enabled Extensions.
 Go to https://extensions.blender.org/ and search up this project
 
-DISCLAIMER: For
 | :exclamation:  DISCLAIMER: This project is currently in the Approval Queue in the extensions page.   |
 |------------------------------------------------------------------------------------------------------|
 
