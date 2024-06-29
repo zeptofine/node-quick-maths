@@ -435,32 +435,66 @@ class Tree:
         return Tree(variables=op.variables(), toplevel_operation=op)
 
 
+def _new_reroute(nt: bpy.types.NodeTree, name: str):
+    node = nt.nodes.new("NodeReroute")
+    if name:
+        node.label = name
+    return node
+
+
+@dataclass
 class ComposeNodes:
-    @classmethod
-    def run(cls, tree: Tree, context: bpy.types.Context, use_reroutes=True):
+    use_reroutes: bool = True
+    center_nodes: bool = True
+    hide_nodes: bool = False
+
+    def run(self, tree: Tree, context: bpy.types.Context):
         bpy.ops.node.select_all(action="DESELECT")
         # Hmm...
         space_data: bpy.types.SpaceNodeEditor = context.space_data
         node_tree: bpy.types.NodeTree = space_data.edit_tree
         offset = (space_data.cursor_location[0], space_data.cursor_location[1])
 
-        layers = cls.execute(tree, nt=node_tree, use_reroutes=use_reroutes)
+        layers = self.execute(tree, nt=node_tree)
 
-        height_margin = 60
+        # node.height is too small to represent the actual visible height of the nodes
+        # for some reason, so these are a little bigger than the width margin
+        if self.hide_nodes:
+            height_margin = -20
+        else:
+            height_margin = 60
         width_margin = 20
-        # loop through every layer in the subtrees, move them to the correct location
-        for l_idx, layer in enumerate(layers):
+
+        layer_heights: list[float] = []
+        for layer in layers:
+            if self.hide_nodes:
+                for node in layer:
+                    node.hide = True
+
             # calculate the total height of the layer
-            height = width = 0
+            height = 0
             for node in layer:
                 height += node.height + height_margin
-                width += node.width + width_margin
+            layer_heights.append(height)
+
+        max_height = max(layer_heights)
+
+        # loop through every layer in the subtrees, move them to the correct location
+        for l_idx, (layer, layer_heights) in enumerate(zip(layers, layer_heights)):
+            # offset the layer by user-defined rules
+            if self.center_nodes:
+                layer_offset = (
+                    offset[0],
+                    offset[1] - ((max_height / 2) - (layer_heights / 2)),
+                )
+            else:
+                layer_offset = offset
 
             # move the nodes
             for n_idx, node in enumerate(layer):
                 position = (
-                    (offset[0] - (node.width + width_margin) * l_idx),
-                    (offset[1] - (node.height + height_margin) * n_idx),
+                    (layer_offset[0] - (node.width + width_margin) * l_idx),
+                    (layer_offset[1] - (node.height + height_margin) * n_idx),
                 )
                 node.location = position
 
@@ -471,18 +505,9 @@ class ComposeNodes:
     @staticmethod
     @abstractmethod
     def _new_value(nt: bpy.types.NodeTree, name: str = ""):
-        ComposeNodes._new_reroute(nt, name)
+        _new_reroute(nt, name)
 
-    def _new_reroute(nt: bpy.types.NodeTree, name: str):
-        node = nt.nodes.new("NodeReroute")
-        if name:
-            node.label = name
-        return node
-
-    @classmethod
-    def execute(
-        cls, tree: Tree, nt: bpy.types.NodeTree, use_reroutes=True
-    ) -> list[list[bpy.types.Node]]:
+    def execute(self, tree: Tree, nt: bpy.types.NodeTree) -> list[list[bpy.types.Node]]:
         sublayers: list[list[bpy.types.Node]]
         node, sublayers, inputs = tree.toplevel_operation.generate(
             nt=nt,
@@ -493,10 +518,10 @@ class ComposeNodes:
         # Create the new variables as Value nodes
         vars = {}
         for idx, variable in enumerate(tree.variables):  # create a Value
-            if use_reroutes:
-                vars[variable] = cls._new_reroute(nt, name=variable)
+            if self.use_reroutes:
+                vars[variable] = _new_reroute(nt, name=variable)
             else:
-                vars[variable] = cls._new_value(nt, name=variable)
+                vars[variable] = self._new_value(nt, name=variable)
 
         # Connect the Value nodes to the corresponding sockets
         for variable, input in inputs:
@@ -539,6 +564,14 @@ class ComposeNodeTree(bpy.types.Operator):
     use_reroutes: bpy.props.BoolProperty(
         name="Use reroutes instead of Values",
         description="Required in Texture Node Editor.",
+    )
+    hide_nodes: bpy.props.BoolProperty(
+        name="Hide nodes",
+        description="Hides nodes to preserve grid space.",
+    )
+    center_nodes: bpy.props.BoolProperty(
+        name="Center nodes",
+        description="Centers the generated nodes. This is a personal preference.",
     )
 
     editor_type: bpy.props.StringProperty(name="Editor Type")
@@ -588,7 +621,6 @@ class ComposeNodeTree(bpy.types.Operator):
 
         try:
             return True, op.parse(expr).to_tree()
-
         except Exception as e:
             return (False, f"{e}")
 
@@ -601,31 +633,42 @@ class ComposeNodeTree(bpy.types.Operator):
         if not isinstance(tree, Tree):
             return {"CANCELLED"}
 
-        _, composer = self.current_operation_type()
+        _, composer_class = self.current_operation_type()
 
-        return composer.run(tree, context, use_reroutes=self.use_reroutes)
+        composer = composer_class(
+            use_reroutes=self.use_reroutes,
+            center_nodes=self.center_nodes,
+            hide_nodes=self.hide_nodes,
+        )
+
+        return composer.run(tree, context)
 
     def draw(self, context: Context):
         layout = self.layout
 
-        box = layout.box()
-
         if self.current_operation_type() is None:
-            box.label(text="This node editor is currently not supported!")
+            layout.label(text="This node editor is currently not supported!")
             return
 
-        col = box.column()
+        layout.prop(self, "expression")
 
-        src_row = col.column()
-        src_row.prop(self, "expression")
+        options_box = layout.box()
+        options = options_box.column(align=True)
+
         if self.editor_type != "TextureNodeTree":
-            src_row.prop(self, "use_reroutes")
-        src_row.prop(self, "show_available_functions")
+            options.prop(self, "use_reroutes")
+        options.prop(self, "hide_nodes")
+        options.prop(
+            self,
+            "center_nodes",
+        )
+        options.prop(self, "show_available_functions")
 
         if self.show_available_functions:
-            col.label(text="Available functions:")
-            col.separator()
-            b = col.box()
+            functions_box = layout.column()
+            functions_box.label(text="Available functions:")
+            functions_box.separator()
+            b = functions_box.box()
             row = b.row()
             for type_, funcs in PRINTABLE_SHADER_MATH_CALLS.items():
                 func_row = row.column(heading=type_)
@@ -640,11 +683,11 @@ class ComposeNodeTree(bpy.types.Operator):
                 if context.preferences.addons[__name__].preferences.debug_prints:
                     print(err_msg)
 
-                b = col.box()
-                col = b.column()
-                col.label(text="Error:")
+                b = layout.box()
+                functions_box = b.column()
+                functions_box.label(text="Error:")
                 for line in err_msg.splitlines():
-                    col.label(text=line, translate=False)
+                    functions_box.label(text=line, translate=False)
 
 
 class Preferences(bpy.types.AddonPreferences):
