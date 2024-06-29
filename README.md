@@ -2,7 +2,7 @@
 
 
 ## Overview
-This extension creates a dialogue that makes it simple to create long chains of math nodes in shaders (and soon geometry nodes).
+This extension creates a dialogue that makes it simple to create long chains of math nodes in shaders, geo nodes, the compositor, and texture nodes.
 
 
 ## Usage
