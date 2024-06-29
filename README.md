@@ -1,5 +1,7 @@
 # Node Quick Maths
 
+![banner image](<images/banner.png>)
+
 
 ## Overview
 This extension creates a dialogue that makes it simple to create long chains of math nodes in shaders, geo nodes, the compositor, and texture nodes.
@@ -71,6 +73,10 @@ And all other mathematical functions in the Math node is supported.
 
 To install the node-quick-maths extension, you must have Blender 4.2+ and have enabled Extensions.
 Go to https://extensions.blender.org/ and search up this project
+
+DISCLAIMER: For
+| :exclamation:  DISCLAIMER: This project is currently in the Approval Queue in the extensions page.   |
+|------------------------------------------------------------------------------------------------------|
 
 ## License
 
