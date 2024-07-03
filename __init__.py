@@ -766,5 +766,5 @@ def unregister():
     registerKeymaps()
 
 
-if __package__ == "__main__":
+if __name__ == "__main__":
     register()

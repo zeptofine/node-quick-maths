@@ -75,9 +75,6 @@ And all other mathematical functions in the Math node is supported.
 To install the node-quick-maths extension, you must have Blender 4.2+ and have enabled Extensions.
 Go to https://extensions.blender.org/ and search up this project
 
-| :exclamation:  DISCLAIMER: This project is currently in the Approval Queue in the extensions page.   |
-|------------------------------------------------------------------------------------------------------|
-
 ## License
 
 This addon is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html). See the `LICENSE` file for more details.
