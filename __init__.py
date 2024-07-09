@@ -1,14 +1,58 @@
-from abc import abstractmethod
+from __future__ import annotations
+
 import ast
+from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Self, Set
+from typing import (
+    Generic,
+    Literal,
+    NoReturn,
+    Self,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 
 import bpy
 from bpy.types import Context, Event
 
+T = TypeVar("T", covariant=True)
+E = TypeVar("E", covariant=True)
 
-def convert_expression(s: str) -> ast.Module:
-    return ast.parse(s, mode="exec")
+
+class Ok(Generic[T]):
+    __slots__ = ("_value",)
+
+    def __init__(self, value: T) -> None:
+        self._value = value
+
+    def is_err(self) -> Literal[False]:
+        return False
+
+    def unwrap(self) -> T:
+        return self._value
+
+    def unwrap_err(self) -> NoReturn:
+        raise Exception("Unwrapped an err on an Ok value")
+
+
+class Err(Generic[E]):
+    __slots__ = ("_value",)
+
+    def __init__(self, value: E) -> None:
+        self._value = value
+
+    def is_err(self) -> Literal[True]:
+        return True
+
+    def unwrap(self) -> NoReturn:
+        raise Exception("Unwrapped on an Err value")
+
+    def unwrap_err(self) -> E:
+        return self._value
+
+
+Result: TypeAlias = Union[Ok[T], Err[E]]
 
 
 BAD_MATH_AST_NODES = (
@@ -34,33 +78,6 @@ BAD_MATH_AST_NODES = (
     ast.Tuple,
     ast.Slice,
 )
-
-# minus ast.Tuple
-# plus ast.Compare
-BAD_VECCTOR_AST_NODES = (
-    ast.BoolOp,
-    ast.Compare,
-    ast.NamedExpr,
-    ast.Lambda,
-    ast.IfExp,
-    ast.Dict,
-    ast.Set,
-    ast.ListComp,
-    ast.SetComp,
-    ast.DictComp,
-    ast.GeneratorExp,
-    ast.Await,
-    ast.Yield,
-    ast.YieldFrom,
-    ast.FormattedValue,
-    ast.JoinedStr,
-    ast.Attribute,
-    ast.Subscript,
-    ast.Starred,
-    ast.List,
-    ast.Slice,
-)
-
 
 SHADER_MATH_CALLS = {  # Function inputs in python, names Blender
     # -------
@@ -183,9 +200,9 @@ class Operation:
     def validate(
         cls,
         e: ast.Module,
-        bad_nodes: tuple[ast.Expr, ...],
-        functions: dict[str, tuple[tuple[int, ...], str]],
-    ) -> tuple[bool, str]:
+        bad_nodes: tuple[type[ast.expr], ...] = BAD_MATH_AST_NODES,
+        functions: dict[str, tuple[tuple[int, ...], str]] = SHADER_MATH_CALLS,
+    ) -> Result[tuple, str]:
         raise NotImplementedError
 
     @classmethod
@@ -194,7 +211,7 @@ class Operation:
         raise NotImplementedError
 
     def to_tree(self):
-        return Tree(variables=self.variables(), toplevel_operation=self)
+        return Tree(variables=list(self.variables()), root=self)
 
     def variables(self) -> set[VARIABLE_NAME]:
         vars: set[VARIABLE_NAME] = set()
@@ -271,13 +288,12 @@ class ShaderMathOperation(Operation):
         return node
 
     @classmethod
-    def _check_bad_type(cls, node: ast.Constant) -> tuple[bool, str]:
+    def _check_bad_type(cls, node: ast.Constant) -> Result[tuple, str]:
         if not isinstance(node.value, (int, float)):
-            return (
-                False,
-                f"Constants cannot be anything other than ints or floats.\n{node.value} is disallowed",
+            return Err(
+                f"Constants cannot be anything other than ints or floats.\n{node.value} is disallowed"
             )
-        return True, ""
+        return Ok(())
 
     @classmethod
     def validate_node(
@@ -285,35 +301,30 @@ class ShaderMathOperation(Operation):
         node: ast.Expr,
         bad_nodes: tuple[type[ast.expr], ...],
         functions: dict[str, tuple[tuple[int, ...], str]],
-    ) -> tuple[bool, str]:
+    ) -> Result[tuple, str]:
         # check if node is bad
         if any(isinstance(node, bad_node) for bad_node in bad_nodes):
-            return (False, f"Do not use node of type: {type(node)} ")
+            return Err(f"Do not use node of type: {type(node)} ")
 
         # check if node is a constant and it is a disallowed type
         if isinstance(node, ast.Constant):
-            s, err = cls._check_bad_type(node)
-            if not s:
-                return s, err
+            r = cls._check_bad_type(node)
+            if r.is_err():
+                return r
 
         # check if node is a call and it has an allowed function name
         if isinstance(node, ast.Call):
             name: ast.Name = node.func
             allowed_nums = functions.get(name.id)
             if allowed_nums is None:
-                return (
-                    False,
-                    f"Unrecognized function name: '{name.id}'",
-                )
-
+                Err(f"Unrecognized function name: '{name.id}'")
             # check if the number of arguments align with the number of arguments in the GOOD_CALLS
-            if all(len(node.args) != x for x in allowed_nums[0]):
-                return (
-                    False,
-                    f"Function {name.id} is allowed, but\nthe number of arguments is wrong\n({len(node.args)} is not in {allowed_nums[0]})",
+            elif all(len(node.args) != x for x in allowed_nums[0]):
+                return Err(
+                    f"Function {name.id} is allowed, but\nthe number of arguments is wrong\n({len(node.args)} is not in {allowed_nums[0]})"
                 )
 
-        return True, ""
+        return Ok(())
 
     @classmethod
     def validate(
@@ -321,22 +332,22 @@ class ShaderMathOperation(Operation):
         e: ast.Module,
         bad_nodes: tuple[type[ast.expr], ...] = BAD_MATH_AST_NODES,
         functions: dict[str, tuple[tuple[int, ...], str]] = SHADER_MATH_CALLS,
-    ) -> tuple[bool, str]:
+    ) -> Result[tuple, str]:
         # check that the node in the ast body is just an Expr
-        expr: ast.Expr
+        expr: ast.stmt
 
         if not e.body:
-            return False, "Expression is empty"
+            return Err("Expression is empty")
 
-        if not isinstance((expr := e.body[0]), ast.Expr):
-            return (False, "Invalid expression type. Only create math expressions!")
+        if not isinstance((expr := e.body[0]), ast.Expr):  # Unsure how this can show up
+            return Err("Invalid expression type. Only create math expressions!")
 
         for node in ast.walk(expr):
-            s, err = cls.validate_node(node, bad_nodes, functions)
-            if not s:
-                return s, err
+            r = cls.validate_node(node, bad_nodes, functions)
+            if r.is_err():
+                return r
 
-        return (True, "")
+        return Ok(())
 
     @classmethod
     def parse(cls, e: ast.expr) -> int | float | str | Self:
@@ -428,14 +439,7 @@ class TextureMathOperation(ShaderMathOperation):
 @dataclass
 class Tree:
     variables: list[VARIABLE_NAME]
-    toplevel_operation: Operation
-
-    def parse(e: ast.Expr, t: type[Operation]) -> Self:
-        op = t.parse(e)
-        assert isinstance(
-            op, Operation
-        ), f"{type(e)} is not a math operation:\n{ast.dump(e, indent=4)}"
-        return Tree(variables=op.variables(), toplevel_operation=op)
+    root: Operation
 
 
 def _new_reroute(nt: bpy.types.NodeTree, name: str):
@@ -512,7 +516,7 @@ class ComposeNodes:
 
     def execute(self, tree: Tree, nt: bpy.types.NodeTree) -> list[list[bpy.types.Node]]:
         sublayers: list[list[bpy.types.Node]]
-        node, sublayers, inputs = tree.toplevel_operation.generate(
+        node, sublayers, inputs = tree.root.generate(
             nt=nt,
         )
 
@@ -582,7 +586,7 @@ class ComposeNodeTree(bpy.types.Operator):
         description="The source expression for the nodes."
     )
 
-    def invoke(self, context: Context, event: Event) -> Set[str]:
+    def invoke(self, context: Context, event: Event) -> set[str]:
         wm = context.window_manager
         ui_mode = context.area.ui_type
         self.editor_type = ui_mode
@@ -610,40 +614,43 @@ class ComposeNodeTree(bpy.types.Operator):
         else:
             return None
 
-    def generate_tree(self, expression: str) -> tuple[bool, str | Tree]:
+    def generate_tree(self, expression: str) -> Result[Tree, str]:
         op_type = self.current_operation_type()
         if op_type is None:
-            return (False, "No known operation type available")
+            return Err("No known operation type available")
         op, _ = op_type
         try:
-            mod = convert_expression(expression)
+            mod = ast.parse(expression, mode="exec")
 
-            valid, e = op.validate(mod)
-            if not valid:
-                return False, e
+            r = op.validate(mod)
+            if r.is_err():
+                return Err(r.unwrap_err())
+
             expr: ast.Expr = mod.body[0]
         except SyntaxError:
-            return (False, "Could not parse expression")
+            return Err("Could not parse expression")
 
         try:
             parsed = op.parse(expr)
         except Exception as e:
-            return False, f"{e}"
-        try:
-            return True, parsed.to_tree()
-        except AttributeError:
-            return False, "Parsed expression is not a valid Tree"
+            return Err(str(e))
+        if not isinstance(parsed, Operation):
+            return Err("Parsed expression is not an Operation")
+
+        return Ok(parsed.to_tree())
 
     def execute(self, context: Context):
         # Create nodes from tree
 
         bpy.ops.node.select_all(action="DESELECT")
 
-        tree = self.generate_tree(self.expression)[1]
-        if not isinstance(tree, Tree):
+        tree = self.generate_tree(self.expression)
+        o = self.current_operation_type()
+        if tree.is_err() or o is None:
             return {"CANCELLED"}
 
-        _, composer_class = self.current_operation_type()
+        tree = tree.unwrap()
+        _, composer_class = o
 
         composer = composer_class(
             use_reroutes=self.use_reroutes,
@@ -688,15 +695,17 @@ class ComposeNodeTree(bpy.types.Operator):
         txt = self.expression
 
         if txt:
-            valid, err_msg = self.generate_tree(txt)
-            if not valid:  # print the error and a picture
+            r = self.generate_tree(txt)
+            if r.is_err():  # print the error
+                msg = r.unwrap_err()
+
                 if context.preferences.addons[__name__].preferences.debug_prints:
-                    print(err_msg)
+                    print(msg)
 
                 b = layout.box()
                 functions_box = b.column()
                 functions_box.label(text="Error:")
-                for line in err_msg.splitlines():
+                for line in msg.splitlines():
                     functions_box.label(text=line, translate=False)
 
 
