@@ -325,6 +325,9 @@ class ShaderMathOperation(Operation):
         # check that the node in the ast body is just an Expr
         expr: ast.Expr
 
+        if not e.body:
+            return False, "Expression is empty"
+
         if not isinstance((expr := e.body[0]), ast.Expr):
             return (False, "Invalid expression type. Only create math expressions!")
 
@@ -614,15 +617,22 @@ class ComposeNodeTree(bpy.types.Operator):
         op, _ = op_type
         try:
             mod = convert_expression(expression)
-            op.validate(mod)
+
+            valid, e = op.validate(mod)
+            if not valid:
+                return False, e
             expr: ast.Expr = mod.body[0]
         except SyntaxError:
             return (False, "Could not parse expression")
 
         try:
-            return True, op.parse(expr).to_tree()
+            parsed = op.parse(expr)
         except Exception as e:
-            return (False, f"{e}")
+            return False, f"{e}"
+        try:
+            return True, parsed.to_tree()
+        except AttributeError:
+            return False, "Parsed expression is not a valid Tree"
 
     def execute(self, context: Context):
         # Create nodes from tree
