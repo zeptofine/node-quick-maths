@@ -4,6 +4,7 @@ import ast
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import (
+    ClassVar,
     Generic,
     Literal,
     NoReturn,
@@ -247,8 +248,8 @@ class Operation:
         children: list[bpy.types.Node] = []
 
         # [
-        #     [                    child1,                                        child2                     ],
-        #     [        child1.1,               child1.2,              child2.1,               child2.2       ],
+        #     [                    child1,                                         child2                    ],
+        #     [       child1.1,                child1.2,              child2.1,               child2.2       ],
         #     [child1.1.1, child1.1.2, child1.2.1, child1.2.2, child2.1.1, child2.1.2, child2.2.1, child2.2.2],
         # ]
         layers: list[list[bpy.types.Node]] = []
@@ -449,20 +450,39 @@ def _new_reroute(nt: bpy.types.NodeTree, name: str):
     return node
 
 
+InputSocketType = [
+    ("VALUE", "Value", "Use values to connect variables."),
+    ("REROUTE", "Reroute", "Use reroute nodes to connect variables."),
+    ("GROUP", "Group", "Create a group for the generated nodes."),
+]
+
+
 @dataclass
 class ComposeNodes:
-    use_reroutes: bool = True
+    socket_type: str = "VALUE"
     center_nodes: bool = True
     hide_nodes: bool = False
 
-    def run(self, tree: Tree, context: bpy.types.Context):
+    tree_type: ClassVar[str]
+    group_type: ClassVar[str]
+
+    def run(
+        self,
+        source: ast.Expr,
+        tree: Tree,
+        context: bpy.types.Context,
+    ):
         bpy.ops.node.select_all(action="DESELECT")
         # Hmm...
         space_data: bpy.types.SpaceNodeEditor = context.space_data
-        node_tree: bpy.types.NodeTree = space_data.edit_tree
-        offset = (space_data.cursor_location[0], space_data.cursor_location[1])
+        nt: bpy.types.NodeTree = space_data.edit_tree
 
-        layers = self.execute(tree, nt=node_tree)
+        layers = self.execute(source, tree, nt, group_offset=space_data.cursor_location)
+
+        if self.socket_type != "GROUP":
+            offset = space_data.cursor_location
+        else:
+            offset = (0.0, 0.0)
 
         # node.height is too small to represent the actual visible height of the nodes
         # for some reason, so these are a little bigger than the width margin
@@ -514,32 +534,77 @@ class ComposeNodes:
     def _new_value(nt: bpy.types.NodeTree, name: str = ""):
         _new_reroute(nt, name)
 
-    def execute(self, tree: Tree, nt: bpy.types.NodeTree) -> list[list[bpy.types.Node]]:
+    def execute(
+        self,
+        source: ast.Expr,
+        tree: Tree,
+        nt: bpy.types.NodeTree,
+        group_offset=(0, 0),
+    ) -> list[list[bpy.types.Node]]:
         sublayers: list[list[bpy.types.Node]]
+
+        if self.socket_type == "GROUP":
+            group = bpy.data.node_groups.new(ast.unparse(source), self.tree_type)
+
+            # add group to node tree
+            node = nt.nodes.new(self.group_type)
+            node.location = group_offset
+            node.node_tree = group
+
+            nt = group
+            interface = nt.interface
+
         node, sublayers, inputs = tree.root.generate(
             nt=nt,
         )
 
         sublayers.insert(0, [node])
 
-        # Create the new variables as Value nodes
-        vars = {}
-        for idx, variable in enumerate(tree.variables):  # create a Value
-            if self.use_reroutes:
-                vars[variable] = _new_reroute(nt, name=variable)
-            else:
-                vars[variable] = self._new_value(nt, name=variable)
+        if self.socket_type == "GROUP":
+            # create the input sockets
+            group_input = nt.nodes.new("NodeGroupInput")
+            sublayers.append([group_input])
 
-        # Connect the Value nodes to the corresponding sockets
+            # create the output socket
+            group_output = nt.nodes.new("NodeGroupOutput")
+            interface.new_socket(
+                name="Output", in_out="OUTPUT", socket_type="NodeSocketFloat"
+            )
+            nt.links.new(node.outputs[0], group_output.inputs[0])
+            sublayers.insert(0, [group_output])
+
+            # add the variables to the interface
+            sockets = {}
+            for variable in tree.variables:
+                interface.new_socket(
+                    name=variable, in_out="INPUT", socket_type="NodeSocketFloat"
+                )
+                sockets[variable] = group_input.outputs[variable]
+
+        else:
+            # Create the variables nodes
+            sockets = {}
+            layer = []
+            for variable in tree.variables:
+                if self.socket_type == "REROUTE":
+                    node = _new_reroute(nt, name=variable)
+                elif self.socket_type == "VALUE":
+                    node = self._new_value(nt, name=variable)
+                layer.append(node)
+                sockets[variable] = node.outputs[0]
+            sublayers.append(layer)
+
+        # Connect the nodes to the corresponding sockets
         for variable, input in inputs:
-            nt.links.new(vars[variable].outputs[0], input)
-
-        sublayers.append(list(vars.values()))
+            nt.links.new(sockets[variable], input)
 
         return sublayers
 
 
 class ComposeShaderMathNodes(ComposeNodes):
+    tree_type = "ShaderNodeTree"
+    group_type = "ShaderNodeGroup"
+
     @staticmethod
     def _new_value(nt: bpy.types.NodeTree, name: str = ""):
         node = nt.nodes.new("ShaderNodeValue")
@@ -548,7 +613,15 @@ class ComposeShaderMathNodes(ComposeNodes):
         return node
 
 
+class ComposeGeometryMathNodes(ComposeShaderMathNodes):
+    tree_type = "GeometryNodeTree"
+    group_type = "GeometryNodeGroup"
+
+
 class ComposeCompositorMathNodes(ComposeNodes):
+    tree_type = "CompositorNodeTree"
+    group_type = "CompositorNodeGroup"
+
     @staticmethod
     def _new_value(nt: bpy.types.NodeTree, name: str = ""):
         node = nt.nodes.new("CompositorNodeValue")
@@ -557,7 +630,9 @@ class ComposeCompositorMathNodes(ComposeNodes):
         return node
 
 
-class ComposeTextureMathNodes(ComposeNodes): ...
+class ComposeTextureMathNodes(ComposeNodes):
+    tree_type = "TextureNodeTree"
+    group_type = "TextureNodeGroup"
 
 
 class ComposeNodeTree(bpy.types.Operator):
@@ -567,10 +642,6 @@ class ComposeNodeTree(bpy.types.Operator):
     show_available_functions: bpy.props.BoolProperty(
         name="Show available functions",
         default=False,
-    )
-    use_reroutes: bpy.props.BoolProperty(
-        name="Use reroutes instead of Values",
-        description="Required in Texture Node Editor.",
     )
     hide_nodes: bpy.props.BoolProperty(
         name="Hide nodes",
@@ -585,6 +656,7 @@ class ComposeNodeTree(bpy.types.Operator):
     expression: bpy.props.StringProperty(
         description="The source expression for the nodes."
     )
+    input_socket_type: bpy.props.EnumProperty(items=InputSocketType, default="REROUTE")
 
     def invoke(self, context: Context, event: Event) -> set[str]:
         wm = context.window_manager
@@ -593,20 +665,15 @@ class ComposeNodeTree(bpy.types.Operator):
         if context.preferences.addons[__name__].preferences.debug_prints:
             print(f"NQM: Editor type: {self.editor_type}")
 
-        self.use_reroutes = context.preferences.addons[
-            __name__
-        ].preferences.use_reroutes
-
-        if self.editor_type == "TextureNodeTree":
-            self.use_reroutes = True
-
         return wm.invoke_props_dialog(self, confirm_text="Create", width=600)
 
     def current_operation_type(
         self,
     ) -> tuple[type[Operation], type[ComposeNodes]] | None:
-        if self.editor_type in {"ShaderNodeTree", "GeometryNodeTree"}:
+        if self.editor_type == "ShaderNodeTree":
             return (ShaderMathOperation, ComposeShaderMathNodes)
+        elif self.editor_type == "GeometryNodeTree":
+            return (ShaderMathOperation, ComposeGeometryMathNodes)
         elif self.editor_type == "CompositorNodeTree":
             return (CompositorMathOperation, ComposeCompositorMathNodes)
         elif self.editor_type == "TextureNodeTree":
@@ -614,7 +681,7 @@ class ComposeNodeTree(bpy.types.Operator):
         else:
             return None
 
-    def generate_tree(self, expression: str) -> Result[Tree, str]:
+    def generate_tree(self, expression: str) -> Result[tuple[ast.Expr, Tree], str]:
         op_type = self.current_operation_type()
         if op_type is None:
             return Err("No known operation type available")
@@ -637,7 +704,7 @@ class ComposeNodeTree(bpy.types.Operator):
         if not isinstance(parsed, Operation):
             return Err("Parsed expression is not an Operation")
 
-        return Ok(parsed.to_tree())
+        return Ok((expr, parsed.to_tree()))
 
     def execute(self, context: Context):
         # Create nodes from tree
@@ -649,16 +716,16 @@ class ComposeNodeTree(bpy.types.Operator):
         if tree.is_err() or o is None:
             return {"CANCELLED"}
 
-        tree = tree.unwrap()
+        expr, tree = tree.unwrap()
         _, composer_class = o
 
         composer = composer_class(
-            use_reroutes=self.use_reroutes,
+            socket_type=self.input_socket_type,
             center_nodes=self.center_nodes,
             hide_nodes=self.hide_nodes,
         )
 
-        return composer.run(tree, context)
+        return composer.run(expr, tree, context)
 
     def draw(self, context: Context):
         layout = self.layout
@@ -672,8 +739,7 @@ class ComposeNodeTree(bpy.types.Operator):
         options_box = layout.box()
         options = options_box.column(align=True)
 
-        if self.editor_type != "TextureNodeTree":
-            options.prop(self, "use_reroutes")
+        options.prop(self, "input_socket_type", expand=True)
         options.prop(self, "hide_nodes")
         options.prop(
             self,
@@ -714,13 +780,9 @@ class Preferences(bpy.types.AddonPreferences):
 
     debug_prints: bpy.props.BoolProperty(
         name="Debug prints",
+
         description="Enables debug prints in the terminal.",
         default=False,
-    )
-
-    use_reroutes: bpy.props.BoolProperty(
-        name="Use reroutes instead of Values",
-        description="Required in Texture Node Editor.",
     )
 
     def draw(self, context):
@@ -731,7 +793,6 @@ class Preferences(bpy.types.AddonPreferences):
             text="Check the Keymaps settings to edit activation. Default is Ctrl + M"
         )
         row.prop(self, "debug_prints")
-        row.prop(self, "use_reroutes")
 
 
 addon_keymaps = []
