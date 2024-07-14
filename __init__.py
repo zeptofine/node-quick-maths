@@ -15,7 +15,7 @@ from typing import (
 )
 
 import bpy
-from bpy.types import Context, Event
+from bpy.types import Context, Event, UILayout
 
 T = TypeVar("T", covariant=True)
 E = TypeVar("E", covariant=True)
@@ -194,7 +194,10 @@ VARIABLE_NAME = str
 @dataclass
 class Operation:
     name: str
+    """ The name of the operation, as described in the bpy API. """
+
     inputs: "list[int | float | str | Operation]"
+    """ Inputs that will be connected during composing"""
 
     @classmethod
     @abstractmethod
@@ -491,6 +494,22 @@ class ComposeNodes:
     tree_type: ClassVar[str]
     group_type: ClassVar[str]
 
+    def preview_generate(self, root: Operation, layout: UILayout) -> None:
+        """Generates a node tree, but inside a uiLayout for previewing"""
+        child_col = layout.column(align=True)
+        for input in root.inputs:
+            input_row = child_col.box().row()
+            if isinstance(input, Operation):
+                # gengenerate_previewr the child operation
+                self.preview_generate(input, input_row)
+            elif not self.hide_nodes:
+                input_row.label(text=str(input))
+
+        # # create a row for the current node's name
+        # root_row = row.column(align=True)
+        layout.label(text=root.name)
+        ...
+
     def run(
         self,
         source: ast.Expr,
@@ -683,12 +702,18 @@ class ComposeNodeTree(bpy.types.Operator):
     )
     input_socket_type: bpy.props.EnumProperty(items=InputSocketType, default="REROUTE")
 
+    generate_previews: bool
+
     def invoke(self, context: Context, event: Event) -> set[str]:
         wm = context.window_manager
         ui_mode = context.area.ui_type
         self.editor_type = ui_mode
         if context.preferences.addons[__name__].preferences.debug_prints:
             print(f"NQM: Editor type: {self.editor_type}")
+
+        self.generate_previews = context.preferences.addons[
+            __name__
+        ].preferences.generate_previews
 
         return wm.invoke_props_dialog(self, confirm_text="Create", width=600)
 
@@ -755,9 +780,13 @@ class ComposeNodeTree(bpy.types.Operator):
     def draw(self, context: Context):
         layout = self.layout
 
-        if self.current_operation_type() is None:
+        o = self.current_operation_type()
+
+        if o is None:
             layout.label(text="This node editor is currently not supported!")
             return
+
+        opt, comp = o
 
         layout.prop(self, "expression")
 
@@ -794,19 +823,36 @@ class ComposeNodeTree(bpy.types.Operator):
                     print(msg)
 
                 b = layout.box()
-                functions_box = b.column()
-                functions_box.label(text="Error:")
+                err_col = b.column()
+                err_col.label(text="Error:")
                 for line in msg.splitlines():
-                    functions_box.label(text=line, translate=False)
+                    err_col.label(text=line, translate=False)
+            elif (
+                self.generate_previews
+            ):  # create a representation of the node tree under the settings
+                preview_box = layout.box()
+
+                composer = comp(
+                    socket_type=self.input_socket_type,
+                    center_nodes=self.center_nodes,
+                    hide_nodes=self.hide_nodes,
+                )
+                composer.preview_generate(r.unwrap()[1].root, preview_box.row())
 
 
 class Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
     debug_prints: bpy.props.BoolProperty(
-        name="Debug prints",
-        description="Enables debug prints in the terminal.",
+        name="Debug Print",
+        description="Enables debug prints in the terminal",
         default=False,
+    )
+
+    generate_previews: bpy.props.BoolProperty(
+        name="Generate Previews",
+        description="Generates previews of node trees before creating them",
+        default=True,
     )
 
     def draw(self, context):
@@ -817,6 +863,7 @@ class Preferences(bpy.types.AddonPreferences):
             text="Check the Keymaps settings to edit activation. Default is Ctrl + M"
         )
         row.prop(self, "debug_prints")
+        row.prop(self, "generate_previews")
 
 
 addon_keymaps = []
