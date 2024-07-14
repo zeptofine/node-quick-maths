@@ -356,6 +356,31 @@ class ShaderMathOperation(Operation):
             op = e.op
 
             if type(op) in SHADER_NODE_BASIC_OPS:
+                # check for Multiply Add
+                if isinstance(op, ast.Add):
+                    if isinstance(e.left, ast.BinOp) and isinstance(
+                        e.left.op, ast.Mult
+                    ):
+                        return cls(
+                            name="MULTIPLY_ADD",
+                            inputs=[
+                                cls.parse(e.left.left),
+                                cls.parse(e.left.right),
+                                cls.parse(e.right),
+                            ],
+                        )
+                    elif isinstance(e.right, ast.BinOp) and isinstance(
+                        e.right.op, ast.Mult
+                    ):
+                        return cls(
+                            name="MULTIPLY_ADD",
+                            inputs=[
+                                cls.parse(e.right.left),
+                                cls.parse(e.right.right),
+                                cls.parse(e.left),
+                            ],
+                        )
+
                 return cls(
                     name=SHADER_NODE_BASIC_OPS[type(op)],
                     inputs=[cls.parse(e.left), cls.parse(e.right)],
@@ -780,7 +805,6 @@ class Preferences(bpy.types.AddonPreferences):
 
     debug_prints: bpy.props.BoolProperty(
         name="Debug prints",
-
         description="Enables debug prints in the terminal.",
         default=False,
     )
