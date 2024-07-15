@@ -191,6 +191,23 @@ SHADER_NODE_BASIC_OPS = {
 VARIABLE_NAME = str
 
 
+InputSocketType = [
+    ("VALUE", "Value", "Use values to connect variables."),
+    ("REROUTE", "Reroute", "Use reroute nodes to connect variables."),
+    ("GROUP", "Group", "Create a group for the generated nodes."),
+]
+
+VariableSortMode = [
+    ("NONE", "None", "Variables are sorted pseudorandomly"),
+    ("ALPHABET", "Alphabetically", "Variables are sorted alphabetically"),
+    (
+        "INSERTION",
+        "By Insertion",
+        "Variables are sorted based on when they were added in the chain",
+    ),
+]
+
+
 @dataclass
 class Operation:
     name: str
@@ -214,17 +231,28 @@ class Operation:
     def parse(cls, e: ast.expr) -> int | float | str | Self:
         raise NotImplementedError
 
-    def to_tree(self):
-        return Tree(variables=list(self.variables()), root=self)
+    def to_tree(self, sort_mode="NONE"):
+        return Tree(variables=self.variables(sort_mode), root=self)
 
-    def variables(self) -> set[VARIABLE_NAME]:
+    def variables(self, sort_mode="NONE") -> list[VARIABLE_NAME]:
+        if sort_mode == "INSERTION":
+            v: list[VARIABLE_NAME] = []
+            for input in self.inputs:
+                if isinstance(input, Operation):
+                    v.extend(var for var in input.variables(sort_mode) if var not in v)
+                elif isinstance(input, VARIABLE_NAME):
+                    v.append(input)
+            return v
+
         vars: set[VARIABLE_NAME] = set()
         for input in self.inputs:
             if isinstance(input, Operation):
-                vars.update(input.variables())
+                vars.update(input.variables(sort_mode))
             elif isinstance(input, VARIABLE_NAME):
                 vars.add(input)
-        return vars
+        if sort_mode == "ALPHABET":
+            return sorted(vars)
+        return list(vars)
 
     @abstractmethod
     def create_node(self, nt: bpy.types.NodeTree) -> bpy.types.Node:
@@ -478,13 +506,6 @@ def _new_reroute(nt: bpy.types.NodeTree, name: str):
     return node
 
 
-InputSocketType = [
-    ("VALUE", "Value", "Use values to connect variables."),
-    ("REROUTE", "Reroute", "Use reroute nodes to connect variables."),
-    ("GROUP", "Group", "Create a group for the generated nodes."),
-]
-
-
 @dataclass
 class ComposeNodes:
     socket_type: str = "VALUE"
@@ -703,6 +724,7 @@ class ComposeNodeTree(bpy.types.Operator):
     input_socket_type: bpy.props.EnumProperty(items=InputSocketType, default="REROUTE")
 
     generate_previews: bool
+    var_sort_mode: str
 
     def invoke(self, context: Context, event: Event) -> set[str]:
         wm = context.window_manager
@@ -714,6 +736,7 @@ class ComposeNodeTree(bpy.types.Operator):
         self.generate_previews = context.preferences.addons[
             __name__
         ].preferences.generate_previews
+        self.var_sort_mode = context.preferences.addons[__name__].preferences.sort_vars
 
         return wm.invoke_props_dialog(self, confirm_text="Create", width=600)
 
@@ -754,7 +777,7 @@ class ComposeNodeTree(bpy.types.Operator):
         if not isinstance(parsed, Operation):
             return Err("Parsed expression is not an Operation")
 
-        return Ok((expr, parsed.to_tree()))
+        return Ok((expr, parsed.to_tree(sort_mode=self.var_sort_mode)))
 
     def execute(self, context: Context):
         # Create nodes from tree
@@ -855,6 +878,13 @@ class Preferences(bpy.types.AddonPreferences):
         default=True,
     )
 
+    sort_vars: bpy.props.EnumProperty(
+        items=VariableSortMode,
+        name="Sort variables",
+        description="The order which to sort variables.",
+        default="NONE",
+    )
+
     def draw(self, context):
         layout = self.layout
 
@@ -864,6 +894,7 @@ class Preferences(bpy.types.AddonPreferences):
         )
         row.prop(self, "debug_prints")
         row.prop(self, "generate_previews")
+        row.prop(self, "sort_vars")
 
 
 addon_keymaps = []
