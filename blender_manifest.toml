@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "node_quick_maths"
-version = "1.1.0"
+version = "1.1.1"
 name = "Node Quick Maths"
 tagline = "A fast way to make long math chains in node editors"
 maintainer = "Erin MacDonald <zeptofine@gmail.com>"
@@ -23,3 +23,13 @@ blender_version_min = "4.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
 # Optional: required by some licenses.
 copyright = ["2023-2024 Erin MacDonald"]
+
+[build]
+paths_exclude_pattern = [
+    "__pycache__/",
+    "/.git/",
+    "/*.zip",
+    "/blender/",
+    "/4.*/",
+    "/images/",
+]
