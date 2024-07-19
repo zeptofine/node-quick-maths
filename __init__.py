@@ -816,7 +816,7 @@ class ComposeNodeTree(bpy.types.Operator):
         options_box = layout.box()
         options = options_box.column(align=True)
 
-        options.prop(self, "input_socket_type", expand=True)
+        options.row().prop(self, "input_socket_type", expand=True)
         options.prop(self, "hide_nodes")
         options.prop(
             self,
