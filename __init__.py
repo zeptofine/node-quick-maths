@@ -521,15 +521,15 @@ class ComposeNodes:
         for input in root.inputs:
             input_row = child_col.box().row()
             if isinstance(input, Operation):
-                # gengenerate_previewr the child operation
+                # generates preview for the child operation
                 self.preview_generate(input, input_row)
             elif not self.hide_nodes:
                 input_row.label(text=str(input))
 
-        # # create a row for the current node's name
-        # root_row = row.column(align=True)
-        layout.label(text=root.name)
-        ...
+        # create a label for the current node's name
+        namecol = layout.column()
+        namecol.label(text=root.name)
+        namecol.separator(type="LINE")
 
     def run(
         self,
@@ -882,7 +882,7 @@ class Preferences(bpy.types.AddonPreferences):
         items=VariableSortMode,
         name="Sort variables",
         description="The order which to sort variables.",
-        default="NONE",
+        default="INSERTION",
     )
 
     def draw(self, context):
