@@ -73,7 +73,7 @@ And all other mathematical functions in the Math node is supported.
 # Installation:
 
 To install the node-quick-maths extension, you must have Blender 4.2+ and have enabled Extensions.
-Go to https://extensions.blender.org/ and search up this project
+Go to https://extensions.blender.org/add-ons/node-quick-maths/ and drag it into blender.
 
 ## License
 
