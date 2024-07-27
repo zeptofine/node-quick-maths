@@ -660,42 +660,44 @@ class ComposeNodes:
         if self.socket_type == "GROUP":
             group = bpy.data.node_groups.new(ast.unparse(source), self.tree_type)
 
-            # add group to node tree
-            node = nt.nodes.new(self.group_type)
-            node.location = group_offset
-            node.node_tree = group
+            interface: bpy.types.NodeTreeInterface = group.interface
 
-            nt = group
-            interface = nt.interface
+            node, sublayers, inputs = tree.root.generate(group)
 
-        node, sublayers, inputs = tree.root.generate(
-            nt=nt,
-        )
+            sublayers.insert(0, [node])
 
-        sublayers.insert(0, [node])
-
-        if self.socket_type == "GROUP":
             # create the input sockets
-            group_input = nt.nodes.new("NodeGroupInput")
+            group_input = group.nodes.new("NodeGroupInput")
             sublayers.append([group_input])
 
             # create the output socket
-            group_output = nt.nodes.new("NodeGroupOutput")
+            group_output = group.nodes.new("NodeGroupOutput")
             interface.new_socket(
                 name="Output", in_out="OUTPUT", socket_type="NodeSocketFloat"
             )
-            nt.links.new(node.outputs[0], group_output.inputs[0])
+            group.links.new(node.outputs[0], group_output.inputs[0])
             sublayers.insert(0, [group_output])
 
             # add the variables to the interface
             sockets = {}
             for variable in tree.variables:
-                interface.new_socket(
+                socket = interface.new_socket(
                     name=variable, in_out="INPUT", socket_type="NodeSocketFloat"
                 )
+                if variable in ASSUMABLE_CONSTANTS:
+                    socket.default_value = ASSUMABLE_CONSTANTS[variable]
                 sockets[variable] = group_input.outputs[variable]
 
+            # add group to node tree
+            node = nt.nodes.new(self.group_type)
+            node.location = group_offset
+            node.node_tree = group
+
         else:
+            node, sublayers, inputs = tree.root.generate(nt)
+
+            sublayers.insert(0, [node])
+
             # Create the variables nodes
             sockets = {}
             layer = []
