@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import (
@@ -83,11 +84,14 @@ BAD_MATH_AST_NODES = (
 SHADER_MATH_CALLS = {  # Function inputs in python, names Blender
     # -------
     # Functions
-    # ADD, SUBTRACT, MULTIPLY, DIVIDE, POWER have dedicated operators
+    # ADD, SUBTRACT, MULTIPLY, DIVIDE have dedicated operators
+    # MULTIPLY_ADD: Special case (a * b + c) or (a + b * c),
+    # POWER has a dedicated operator
     "log": ((1, 2), "LOGARITHM"),  # (x[, base])
     "sqrt": ((1,), "SQRT"),  # (x)
+    # INVERSE_SQRT: Special case ( 1 / sqrt(x) )
     "abs": ((1,), "ABSOLUTE"),  # (x)
-    "exp": ((1,), "EXPONENT"),  # (x)
+    "exp": ((1,), "EXPONENT"),  # (x) or (e ** x)
     # -------
     # Comparison
     "min": ((2,), "MINIMUM"),  # (x, y)
@@ -190,6 +194,12 @@ SHADER_NODE_BASIC_OPS = {
 
 VARIABLE_NAME = str
 
+ASSUMABLE_CONSTANTS = {
+    "pi": math.pi,
+    "e": math.e,
+    "tau": math.tau,
+}
+
 
 InputSocketType = [
     ("VALUE", "Value", "Use values to connect variables."),
@@ -199,10 +209,10 @@ InputSocketType = [
 
 VariableSortMode = [
     ("NONE", "None", "Variables are sorted pseudorandomly"),
-    ("ALPHABET", "Alphabetically", "Variables are sorted alphabetically"),
+    ("ALPHABET", "Alphabet", "Variables are sorted alphabetically"),
     (
         "INSERTION",
-        "By Insertion",
+        "Insertion",
         "Variables are sorted based on when they were added in the chain",
     ),
 ]
@@ -412,21 +422,54 @@ class ShaderMathOperation(Operation):
                             ],
                         )
 
+                # check for Inverse Square Root
+                if (
+                    isinstance(op, ast.Div)
+                    and isinstance(e.left, ast.Constant)
+                    and e.left.value == 1
+                    and isinstance(e.right, ast.Call)
+                    and e.right.func.id == "sqrt"
+                ):
+                    return cls(
+                        name="INVERSE_SQRT",
+                        inputs=[
+                            cls.parse(e.right.args[0]),
+                        ],
+                    )
+
+                # check for Exponent
+                if (
+                    isinstance(op, ast.Pow)
+                    and isinstance(e.left, ast.Name)
+                    and e.left.id == "e"
+                ):
+                    return cls(
+                        name="EXPONENT",
+                        inputs=[
+                            cls.parse(e.right),
+                        ],
+                    )
+
                 return cls(
                     name=SHADER_NODE_BASIC_OPS[type(op)],
                     inputs=[cls.parse(e.left), cls.parse(e.right)],
                 )
+
             elif isinstance(op, ast.FloorDiv):
                 return cls(
                     name="FLOOR",
                     inputs=[
                         cls(
                             name="DIVIDE",
-                            inputs=[cls.parse(e.left), cls.parse(e.right)],
+                            inputs=[
+                                cls.parse(e.left),
+                                cls.parse(e.right),
+                            ],
                         ),
                         0,
                     ],
                 )
+
             else:
                 raise NotImplementedError(f"Unhandled operation {op}")
 
@@ -443,12 +486,18 @@ class ShaderMathOperation(Operation):
             if isinstance(e.ops[0], (ast.Gt, ast.GtE)):
                 return cls(
                     name="GREATER_THAN",
-                    inputs=[cls.parse(e.left), cls.parse(e.comparators[0])],
+                    inputs=[
+                        cls.parse(e.left),
+                        cls.parse(e.comparators[0]),
+                    ],
                 )
             elif isinstance(e.ops[0], (ast.Lt, ast.LtE)):
                 return cls(
                     name="LESS_THAN",
-                    inputs=[cls.parse(e.left), cls.parse(e.comparators[0])],
+                    inputs=[
+                        cls.parse(e.left),
+                        cls.parse(e.comparators[0]),
+                    ],
                 )
             elif isinstance(e.ops[0], ast.Eq):  # Opinion
                 return cls(
@@ -675,6 +724,8 @@ class ComposeShaderMathNodes(ComposeNodes):
         node = nt.nodes.new("ShaderNodeValue")
         if name:
             node.label = name
+            if name in ASSUMABLE_CONSTANTS:
+                node.outputs[0].default_value = ASSUMABLE_CONSTANTS[name]
         return node
 
 
@@ -692,6 +743,8 @@ class ComposeCompositorMathNodes(ComposeNodes):
         node = nt.nodes.new("CompositorNodeValue")
         if name:
             node.label = name
+            if name in ASSUMABLE_CONSTANTS:
+                node.outputs[0].default_value = ASSUMABLE_CONSTANTS[name]
         return node
 
 
@@ -894,7 +947,10 @@ class Preferences(bpy.types.AddonPreferences):
         )
         row.prop(self, "debug_prints")
         row.prop(self, "generate_previews")
-        row.prop(self, "sort_vars")
+
+        r = row.row()
+        r.label(text="Sort variables by...")
+        r.prop(self, "sort_vars", expand=True)
 
 
 addon_keymaps = []
