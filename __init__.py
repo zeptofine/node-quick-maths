@@ -4,6 +4,8 @@ import ast
 import math
 from abc import abstractmethod
 from dataclasses import dataclass
+import difflib
+from functools import lru_cache
 from typing import (
     ClassVar,
     Generic,
@@ -141,8 +143,9 @@ PRINTABLE_SHADER_MATH_CALLS = {
         "**",
         "log(x[, base])",
         "sqrt(x)",
+        "1 / sqrt(x)",
         "abs(x)",
-        "exp(x)",
+        "exp(x) or e ** x",
     ),
     "Comparison": (
         "min(x, y)",
@@ -182,16 +185,6 @@ PRINTABLE_SHADER_MATH_CALLS = {
 }
 
 
-SHADER_NODE_BASIC_OPS = {
-    ast.Add: "ADD",
-    ast.Sub: "SUBTRACT",
-    ast.Mult: "MULTIPLY",
-    ast.Div: "DIVIDE",
-    ast.Mod: "MODULO",
-    ast.Pow: "POWER",
-}
-
-
 VARIABLE_NAME = str
 
 ASSUMABLE_CONSTANTS = {
@@ -218,12 +211,12 @@ VariableSortMode = [
 ]
 
 
-@dataclass
+@dataclass(frozen=True)
 class Operation:
     name: str
     """ The name of the operation, as described in the bpy API. """
 
-    inputs: "list[int | float | str | Operation]"
+    inputs: "tuple[_Input, ...]"
     """ Inputs that will be connected during composing"""
 
     @classmethod
@@ -238,7 +231,7 @@ class Operation:
 
     @classmethod
     @abstractmethod
-    def parse(cls, e: ast.expr) -> int | float | str | Self:
+    def parse(cls, e: ast.expr, order_by_complexity: bool) -> int | float | str | Self:
         raise NotImplementedError
 
     def to_tree(self, sort_mode="NONE"):
@@ -323,6 +316,33 @@ class Operation:
         return parent, layers, oinputs
 
 
+_Input = int | float | str | Operation
+
+
+@lru_cache(maxsize=64)
+def ipt_complexity(inpt: _Input):
+    """
+    Calculates the complexity of an Operation input,
+    Complexity being defined as the number of sub-operations that are required to compute this operation, plus itself.
+    """
+    if isinstance(inpt, Operation):
+        return sum(ipt_complexity(arg) for arg in inpt.inputs) + 1
+    else:
+        return 0
+
+
+SHADER_NODE_BASIC_OPS: dict[type[ast.operator], str] = {
+    # Add is covered
+    ast.Sub: "SUBTRACT",
+    # Mult is covered
+    # Div is covered
+    ast.Mod: "MODULO",
+    # Pow is covered
+    # Floordiv is covered
+    # MatMult, LShift, RShift, BitOr, BitXor, BitAnd will not be implemented
+}
+
+
 class ShaderMathOperation(Operation):
     def create_node(self, nt: bpy.types.NodeTree) -> bpy.types.Node:
         node = nt.nodes.new("ShaderNodeMath")
@@ -356,10 +376,19 @@ class ShaderMathOperation(Operation):
 
         # check if node is a call and it has an allowed function name
         if isinstance(node, ast.Call):
-            name: ast.Name = node.func
+            if not isinstance(node.func, ast.Name):
+                return Err("Functions may only be called by name")
+            name = node.func
             allowed_nums = functions.get(name.id)
             if allowed_nums is None:
-                Err(f"Unrecognized function name: '{name.id}'")
+                errmsg = f"Unrecognized function name: '{name.id}'"
+
+                if matches := difflib.get_close_matches(name.id, list(functions)):
+                    return Err(
+                        f"{errmsg}\nDid you mean one of these?\n{', '.join(matches)}"
+                    )
+                return Err(errmsg)
+
             # check if the number of arguments align with the number of arguments in the GOOD_CALLS
             elif all(len(node.args) != x for x in allowed_nums[0]):
                 return Err(
@@ -392,52 +421,76 @@ class ShaderMathOperation(Operation):
         return Ok(())
 
     @classmethod
-    def parse(cls, e: ast.expr) -> int | float | str | Self:
+    def parse(cls, e: ast.expr, order_by_complexity: bool) -> int | float | str | Self:
+        def maybe_sort(args: tuple[_Input, ...]):
+            """Helper method."""
+            if order_by_complexity:
+                return tuple(sorted(args, key=ipt_complexity, reverse=True))
+            return args
+
+        def parse(e):
+            """Parses the expression, carrying over settings."""
+            return cls.parse(e, order_by_complexity)
+
         if isinstance(e, ast.BinOp):
             op = e.op
 
             if type(op) in SHADER_NODE_BASIC_OPS:
-                # check for Multiply Add
-                if isinstance(op, ast.Add):
-                    if isinstance(e.left, ast.BinOp) and isinstance(
-                        e.left.op, ast.Mult
-                    ):
-                        return cls(
-                            name="MULTIPLY_ADD",
-                            inputs=[
-                                cls.parse(e.left.left),
-                                cls.parse(e.left.right),
-                                cls.parse(e.right),
-                            ],
-                        )
-                    elif isinstance(e.right, ast.BinOp) and isinstance(
-                        e.right.op, ast.Mult
-                    ):
-                        return cls(
-                            name="MULTIPLY_ADD",
-                            inputs=[
-                                cls.parse(e.right.left),
-                                cls.parse(e.right.right),
-                                cls.parse(e.left),
-                            ],
-                        )
+                return cls(
+                    name=SHADER_NODE_BASIC_OPS[type(op)],
+                    inputs=(
+                        parse(e.left),
+                        parse(e.right),
+                    ),
+                )
 
+            if isinstance(op, ast.Add):
+                # check for Multiply Add
+                if isinstance(e.left, ast.BinOp) and isinstance(e.left.op, ast.Mult):
+                    return cls(
+                        name="MULTIPLY_ADD",
+                        inputs=(
+                            *maybe_sort((parse(e.left.left), parse(e.left.right))),
+                            parse(e.right),
+                        ),
+                    )
+                if isinstance(e.right, ast.BinOp) and isinstance(e.right.op, ast.Mult):
+                    return cls(
+                        name="MULTIPLY_ADD",
+                        inputs=(
+                            *maybe_sort((parse(e.right.left), parse(e.right.right))),
+                            parse(e.left),
+                        ),
+                    )
+
+                return cls(
+                    name="ADD", inputs=maybe_sort((parse(e.left), parse(e.right)))
+                )
+
+            if isinstance(op, ast.Mult):
+                return cls(
+                    name="MULTIPLY", inputs=maybe_sort((parse(e.left), parse(e.right)))
+                )
+
+            if isinstance(op, ast.Div):
                 # check for Inverse Square Root
                 if (
-                    isinstance(op, ast.Div)
-                    and isinstance(e.left, ast.Constant)
+                    isinstance(e.left, ast.Constant)
                     and e.left.value == 1
                     and isinstance(e.right, ast.Call)
                     and e.right.func.id == "sqrt"
                 ):
                     return cls(
                         name="INVERSE_SQRT",
-                        inputs=[
-                            cls.parse(e.right.args[0]),
-                        ],
+                        inputs=(parse(e.right.args[0]),),
                     )
+                return cls(
+                    name="DIVIDE",
+                    inputs=(parse(e.left), parse(e.right)),
+                )
 
-                # check for Exponent
+            # check for Exponent(
+            if isinstance(op, ast.Pow):
                 if (
                     isinstance(op, ast.Pow)
                     and isinstance(e.left, ast.Name)
@@ -445,33 +498,25 @@ class ShaderMathOperation(Operation):
                 ):
                     return cls(
                         name="EXPONENT",
-                        inputs=[
-                            cls.parse(e.right),
-                        ],
+                        inputs=(parse(e.right),),
                     )
-
                 return cls(
-                    name=SHADER_NODE_BASIC_OPS[type(op)],
-                    inputs=[cls.parse(e.left), cls.parse(e.right)],
+                    name="POWER",
+                    inputs=(parse(e.left), parse(e.right)),
                 )
 
-            elif isinstance(op, ast.FloorDiv):
+            if isinstance(op, ast.FloorDiv):
                 return cls(
                     name="FLOOR",
-                    inputs=[
+                    inputs=(
                         cls(
                             name="DIVIDE",
-                            inputs=[
-                                cls.parse(e.left),
-                                cls.parse(e.right),
-                            ],
+                            inputs=(parse(e.left), parse(e.right)),
                         ),
-                        0,
-                    ],
+                    ),
                 )
 
-            else:
-                raise NotImplementedError(f"Unhandled operation {op}")
+            raise NotImplementedError(f"Unhandled operation {op}")
 
         if isinstance(e, ast.UnaryOp) and isinstance(e.op, ast.USub):
             if isinstance(e.operand, ast.Constant):
@@ -479,42 +524,62 @@ class ShaderMathOperation(Operation):
             else:
                 return cls(
                     name="MULTIPLY",
-                    inputs=[cls.parse(e.operand), -1],
+                    inputs=(parse(e.operand), -1),
                 )
 
         if isinstance(e, ast.Compare):
             if isinstance(e.ops[0], (ast.Gt, ast.GtE)):
-                return cls(
-                    name="GREATER_THAN",
-                    inputs=[
-                        cls.parse(e.left),
-                        cls.parse(e.comparators[0]),
-                    ],
+                # check if the comparison can be flipped to simplify
+                inputs = (
+                    parse(e.left),
+                    parse(e.comparators[0]),
                 )
+                if inputs == (ms := maybe_sort(inputs)):
+                    name = "GREATER_THAN"
+                else:
+                    name = "LESS_THAN"
+                    inputs = ms
+
+                return cls(
+                    name=name,
+                    inputs=inputs,
+                )
+
             elif isinstance(e.ops[0], (ast.Lt, ast.LtE)):
-                return cls(
-                    name="LESS_THAN",
-                    inputs=[
-                        cls.parse(e.left),
-                        cls.parse(e.comparators[0]),
-                    ],
+                # check if the comparison can be flipped to simplify
+                inputs = (
+                    parse(e.left),
+                    parse(e.comparators[0]),
                 )
+                if inputs == (ms := maybe_sort(inputs)):
+                    name = "LESS_THAN"
+                else:
+                    name = "GREATER_THAN"
+                    inputs = ms
+
+                return cls(
+                    name=name,
+                    inputs=inputs,
+                )
+
             elif isinstance(e.ops[0], ast.Eq):  # Opinion
                 return cls(
                     name="COMPARE",
-                    inputs=[
-                        cls.parse(e.left),
-                        cls.parse(e.comparators[0]),
+                    inputs=(
+                        *maybe_sort((parse(e.left), parse(e.comparators[0]))),
                         0.5,
-                    ],
+                    ),
                 )
 
         if isinstance(e, ast.Call):
             inputs = []
             for arg in e.args:
-                inputs.append(cls.parse(arg))
+                inputs.append(parse(arg))
 
-            return cls(name=SHADER_MATH_CALLS[e.func.id][1], inputs=inputs)
+            return cls(
+                name=SHADER_MATH_CALLS[e.func.id][1],
+                inputs=tuple(inputs),
+            )
 
         if isinstance(e, ast.Constant):
             return e.value
@@ -523,7 +588,7 @@ class ShaderMathOperation(Operation):
             return e.id
 
         if isinstance(e, ast.Expr):
-            return cls.parse(e.value)
+            return parse(e.value)
 
         raise NotImplementedError(f"Unhandled expression {ast.dump(e, indent=4)}")
 
@@ -621,12 +686,12 @@ class ComposeNodes:
         max_height = max(layer_heights)
 
         # loop through every layer in the subtrees, move them to the correct location
-        for l_idx, (layer, layer_heights) in enumerate(zip(layers, layer_heights)):
+        for l_idx, (layer, height) in enumerate(zip(layers, layer_heights)):
             # offset the layer by user-defined rules
             if self.center_nodes:
                 layer_offset = (
                     offset[0],
-                    offset[1] - ((max_height / 2) - (layer_heights / 2)),
+                    offset[1] - ((max_height / 2) - (height / 2)),
                 )
             else:
                 layer_offset = offset
@@ -765,16 +830,22 @@ class ComposeNodeTree(bpy.types.Operator):
     )
     hide_nodes: bpy.props.BoolProperty(
         name="Hide nodes",
-        description="Hides nodes to preserve grid space.",
+        description="Hides nodes to preserve grid space",
     )
     center_nodes: bpy.props.BoolProperty(
         name="Center nodes",
-        description="Centers the generated nodes. This is a personal preference.",
+        description="Centers the generated nodes. This is a personal preference",
+    )
+
+    order_operations_by_complexity: bpy.props.BoolProperty(
+        name="Order operations by complexity",
+        default=False,
+        description="Attempts to order the tree such that the longest branches are at the top when possible",
     )
 
     editor_type: bpy.props.StringProperty(name="Editor Type")
     expression: bpy.props.StringProperty(
-        description="The source expression for the nodes."
+        description="The source expression for the nodes"
     )
     input_socket_type: bpy.props.EnumProperty(items=InputSocketType, default="REROUTE")
 
@@ -826,7 +897,7 @@ class ComposeNodeTree(bpy.types.Operator):
             return Err("Could not parse expression")
 
         try:
-            parsed = op.parse(expr)
+            parsed = op.parse(expr, self.order_operations_by_complexity)
         except Exception as e:
             return Err(str(e))
         if not isinstance(parsed, Operation):
@@ -872,12 +943,16 @@ class ComposeNodeTree(bpy.types.Operator):
         options = options_box.column(align=True)
 
         options.row().prop(self, "input_socket_type", expand=True)
-        options.prop(self, "hide_nodes")
-        options.prop(
+        options = options.row()
+        col1 = options.column(align=True)
+        col1.prop(self, "hide_nodes")
+        col1.prop(
             self,
             "center_nodes",
         )
-        options.prop(self, "show_available_functions")
+        col2 = options.column(align=True)
+        col2.prop(self, "order_operations_by_complexity")
+        col2.prop(self, "show_available_functions")
 
         if self.show_available_functions:
             functions_box = layout.column()
@@ -936,7 +1011,7 @@ class Preferences(bpy.types.AddonPreferences):
     sort_vars: bpy.props.EnumProperty(
         items=VariableSortMode,
         name="Sort variables",
-        description="The order which to sort variables.",
+        description="The order which to sort variables",
         default="INSERTION",
     )
 
