@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "node_quick_maths"
-version = "1.1.1"
+version = "1.2.0"
 name = "Node Quick Maths"
 tagline = "A fast way to make long math chains in node editors"
 maintainer = "Erin MacDonald <zeptofine@gmail.com>"
