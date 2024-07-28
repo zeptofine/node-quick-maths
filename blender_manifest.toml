@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "node_quick_maths"
-version = "1.2.0"
+version = "1.2.1"
 name = "Node Quick Maths"
 tagline = "A fast way to make long math chains in node editors"
 maintainer = "Erin MacDonald <zeptofine@gmail.com>"
@@ -27,9 +27,10 @@ copyright = ["2023-2024 Erin MacDonald"]
 [build]
 paths_exclude_pattern = [
     "__pycache__/",
-    "/.git/",
+    "/.git*",
     "/*.zip",
     "/blender/",
     "/4.*/",
     "/images/",
+    ".ruff_cache",
 ]

@@ -758,6 +758,8 @@ class ComposeNodes:
             node.location = group_offset
             node.node_tree = group
 
+            nt = group
+
         else:
             node, sublayers, inputs = tree.root.generate(nt)
 
