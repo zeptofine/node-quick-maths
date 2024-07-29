@@ -858,13 +858,13 @@ class ComposeNodeTree(bpy.types.Operator):
         wm = context.window_manager
         ui_mode = context.area.ui_type
         self.editor_type = ui_mode
-        if context.preferences.addons[__name__].preferences.debug_prints:
+        if context.preferences.addons[__package__].preferences.debug_prints:
             print(f"NQM: Editor type: {self.editor_type}")
 
         self.generate_previews = context.preferences.addons[
-            __name__
+            __package__
         ].preferences.generate_previews
-        self.var_sort_mode = context.preferences.addons[__name__].preferences.sort_vars
+        self.var_sort_mode = context.preferences.addons[__package__].preferences.sort_vars
 
         return wm.invoke_props_dialog(self, confirm_text="Create", width=600)
 
@@ -974,7 +974,7 @@ class ComposeNodeTree(bpy.types.Operator):
             if r.is_err():  # print the error
                 msg = r.unwrap_err()
 
-                if context.preferences.addons[__name__].preferences.debug_prints:
+                if context.preferences.addons[__package__].preferences.debug_prints:
                     print(msg)
 
                 b = layout.box()
