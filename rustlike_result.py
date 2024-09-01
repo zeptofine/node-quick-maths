@@ -1,20 +1,20 @@
 from dataclasses import dataclass
-from typing import Generic, Literal, NoReturn, TypeAlias, TypeVar, Union
+from typing import Generic, Literal, NoReturn, TypeAlias, TypeVar
 
-T = TypeVar("T", covariant=True)
-E = TypeVar("E", covariant=True)
+T_co = TypeVar("T_co", covariant=True)
+E_co = TypeVar("E_co", covariant=True)
 
 
 @dataclass
-class Ok(Generic[T]):
+class Ok(Generic[T_co]):
     __slots__ = ("_value",)
 
-    _value: T
+    _value: T_co
 
     def is_err(self) -> Literal[False]:
         return False
 
-    def unwrap(self) -> T:
+    def unwrap(self) -> T_co:
         return self._value
 
     def unwrap_err(self) -> NoReturn:
@@ -22,10 +22,10 @@ class Ok(Generic[T]):
 
 
 @dataclass
-class Err(Generic[E]):
+class Err(Generic[E_co]):
     __slots__ = ("_value",)
 
-    _value: E
+    _value: E_co
 
     def is_err(self) -> Literal[True]:
         return True
@@ -33,8 +33,8 @@ class Err(Generic[E]):
     def unwrap(self) -> NoReturn:
         raise Exception("Unwrapped on an Err value")
 
-    def unwrap_err(self) -> E:
+    def unwrap_err(self) -> E_co:
         return self._value
 
 
-Result: TypeAlias = Union[Ok[T], Err[E]]
+Result: TypeAlias = Ok[T_co] | Err[E_co]

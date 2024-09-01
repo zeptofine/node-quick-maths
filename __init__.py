@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import ast
+import traceback
 
 import bpy
 from bpy.types import Context, Event
 
-from .constants import PRINTABLE_SHADER_MATH_CALLS
+from .constants import SHADER_MATH_CALLS, Function, PrintRepresent
 from .node_composers import (
     ComposeCompositorMathNodes,
     ComposeGeometryMathNodes,
@@ -14,10 +15,10 @@ from .node_composers import (
     ComposeTextureMathNodes,
 )
 from .operations import (
-    CompositorMathOperation,
+    CompositorSimpleMathOperation,
     Operation,
     ShaderMathOperation,
-    TextureMathOperation,
+    TextureSimpleMathOperation,
     Tree,
 )
 from .rustlike_result import Err, Ok, Result
@@ -36,6 +37,11 @@ VariableSortMode = [
         "Insertion",
         "Variables are sorted based on when they were added in the chain",
     ),
+]
+
+NodeType = [
+    ("MATH", "Math", "Use basic math nodes."),
+    ("VECTOR", "Vector", "Use vector nodes."),
 ]
 
 
@@ -57,9 +63,7 @@ class ComposeNodeTree(bpy.types.Operator):
     )
 
     editor_type: bpy.props.StringProperty(name="Editor Type")
-    expression: bpy.props.StringProperty(
-        description="The source expression for the nodes"
-    )
+    expression: bpy.props.StringProperty(description="The source expression for the nodes")
     input_socket_type: bpy.props.EnumProperty(items=InputSocketType, default="REROUTE")
 
     generate_previews: bool
@@ -72,34 +76,53 @@ class ComposeNodeTree(bpy.types.Operator):
         if context.preferences.addons[__package__].preferences.debug_prints:
             print(f"NQM: Editor type: {self.editor_type}")
 
-        self.generate_previews = context.preferences.addons[
-            __package__
-        ].preferences.generate_previews
-        self.var_sort_mode = context.preferences.addons[
-            __package__
-        ].preferences.sort_vars
+        self.generate_previews = context.preferences.addons[__package__].preferences.generate_previews
+        self.var_sort_mode = context.preferences.addons[__package__].preferences.sort_vars
 
         return wm.invoke_props_dialog(self, confirm_text="Create", width=600)
 
     def current_operation_type(
         self,
-    ) -> tuple[type[Operation], type[ComposeNodes]] | None:
+    ) -> (
+        tuple[
+            type[Operation],
+            type[ComposeNodes],
+            dict[str, dict[str, Function | PrintRepresent]],
+        ]
+        | None
+    ):
         if self.editor_type == "ShaderNodeTree":
-            return (ShaderMathOperation, ComposeShaderMathNodes)
-        elif self.editor_type == "GeometryNodeTree":
-            return (ShaderMathOperation, ComposeGeometryMathNodes)
-        elif self.editor_type == "CompositorNodeTree":
-            return (CompositorMathOperation, ComposeCompositorMathNodes)
-        elif self.editor_type == "TextureNodeTree":
-            return (TextureMathOperation, ComposeTextureMathNodes)
-        else:
-            return None
+            return (
+                ShaderMathOperation,
+                ComposeShaderMathNodes,
+                SHADER_MATH_CALLS,
+            )
+        if self.editor_type == "GeometryNodeTree":
+            return (
+                ShaderMathOperation,
+                ComposeGeometryMathNodes,
+                SHADER_MATH_CALLS,
+            )
+        if self.editor_type == "CompositorNodeTree":
+            return (
+                CompositorSimpleMathOperation,
+                ComposeCompositorMathNodes,
+                SHADER_MATH_CALLS,
+            )
+        if self.editor_type == "TextureNodeTree":
+            return (
+                TextureSimpleMathOperation,
+                ComposeTextureMathNodes,
+                SHADER_MATH_CALLS,
+            )
+
+        return None
 
     def generate_tree(self, expression: str) -> Result[tuple[ast.Expr, Tree], str]:
         op_type = self.current_operation_type()
         if op_type is None:
             return Err("No known operation type available")
-        op, _ = op_type
+        op, _, _ = op_type
         try:
             mod = ast.parse(expression.strip(), mode="exec")
 
@@ -109,12 +132,14 @@ class ComposeNodeTree(bpy.types.Operator):
 
             expr: ast.Expr = mod.body[0]
         except SyntaxError as e:
+            traceback.print_exc()
             print(e)
             return Err("Could not parse expression")
 
         try:
             parsed = op.parse(expr)
         except Exception as e:
+            traceback.print_exc()
             return Err(str(e))
         if not isinstance(parsed, Operation):
             return Err("Parsed expression is not an Operation")
@@ -132,7 +157,7 @@ class ComposeNodeTree(bpy.types.Operator):
             return {"CANCELLED"}
 
         expr, tree = tree.unwrap()
-        _, composer_class = o
+        _, composer_class, _ = o
 
         composer = composer_class(
             socket_type=self.input_socket_type,
@@ -151,7 +176,7 @@ class ComposeNodeTree(bpy.types.Operator):
             layout.label(text="This node editor is currently not supported!")
             return
 
-        opt, comp = o
+        _, comp, calls = o
 
         layout.prop(self, "expression")
 
@@ -175,10 +200,14 @@ class ComposeNodeTree(bpy.types.Operator):
             functions_box.separator()
             b = functions_box.box()
             row = b.row()
-            for type_, funcs in PRINTABLE_SHADER_MATH_CALLS.items():
-                func_row = row.column(heading=type_)
-                for func in funcs:
-                    func_row.label(text=func, translate=False)
+
+            for category, funcs in calls.items():
+                func_row = row.column(heading=category)
+                func_row.label(text=category)
+                for name, func in funcs.items():
+                    text = name + str(func) if isinstance(func, Function) else func
+
+                    func_row.label(text=text, translate=False)
 
         txt = self.expression
 
@@ -195,9 +224,7 @@ class ComposeNodeTree(bpy.types.Operator):
                 err_col.label(text="Error:")
                 for line in msg.splitlines():
                     err_col.label(text=line, translate=False)
-            elif (
-                self.generate_previews
-            ):  # create a representation of the node tree under the settings
+            elif self.generate_previews:  # create a representation of the node tree under the settings
                 preview_box = layout.box()
 
                 composer = comp(
@@ -234,9 +261,7 @@ class Preferences(bpy.types.AddonPreferences):
         layout = self.layout
 
         row = layout.column(align=True)
-        row.label(
-            text="Check the Keymaps settings to edit activation. Default is Ctrl + M"
-        )
+        row.label(text="Check the Keymaps settings to edit activation. Default is Ctrl + M")
         row.prop(self, "debug_prints")
         row.prop(self, "generate_previews")
 
@@ -253,9 +278,7 @@ def registerKeymaps():
     if wm.keyconfigs.addon:
         km = wm.keyconfigs.addon.keymaps.get("Node Editor")
         if not km:
-            km = wm.keyconfigs.addon.keymaps.new(
-                name="Node Editor", space_type="NODE_EDITOR"
-            )
+            km = wm.keyconfigs.addon.keymaps.new(name="Node Editor", space_type="NODE_EDITOR")
 
         kmi = km.keymap_items.new(
             "node.compose_qm_nodes",

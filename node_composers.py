@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import bpy
-from bpy.types import UILayout
+from bpy.types import Node, UILayout
 
 from .constants import ASSUMABLE_CONSTANTS
 from .operations import Operation, Tree
 
 
-def _new_reroute(nt: bpy.types.NodeTree, name: str):
+def _new_reroute(nt: bpy.types.NodeTree, name: str) -> Node:
     node = nt.nodes.new("NodeReroute")
     if name:
         node.label = name
@@ -85,13 +85,7 @@ class ComposeNodes:
         # loop through every layer in the subtrees, move them to the correct location
         for l_idx, (layer, height) in enumerate(zip(layers, layer_heights)):
             # offset the layer by user-defined rules
-            if self.center_nodes:
-                layer_offset = (
-                    offset[0],
-                    offset[1] - ((max_height / 2) - (height / 2)),
-                )
-            else:
-                layer_offset = offset
+            layer_offset = (offset[0], offset[1] - (max_height / 2 - height / 2)) if self.center_nodes else offset
 
             # move the nodes
             for n_idx, node in enumerate(layer):
@@ -116,8 +110,8 @@ class ComposeNodes:
         tree: Tree,
         nt: bpy.types.NodeTree,
         group_offset=(0, 0),
-    ) -> list[list[bpy.types.Node]]:
-        sublayers: list[list[bpy.types.Node]]
+    ) -> list[list[Node]]:
+        sublayers: list[list[Node]]
 
         if self.socket_type == "GROUP":
             group = bpy.data.node_groups.new(ast.unparse(source), self.tree_type)
@@ -134,18 +128,14 @@ class ComposeNodes:
 
             # create the output socket
             group_output = group.nodes.new("NodeGroupOutput")
-            interface.new_socket(
-                name="Output", in_out="OUTPUT", socket_type="NodeSocketFloat"
-            )
+            interface.new_socket(name="Output", in_out="OUTPUT", socket_type="NodeSocketFloat")
             group.links.new(node.outputs[0], group_output.inputs[0])
             sublayers.insert(0, [group_output])
 
             # add the variables to the interface
             sockets = {}
             for variable in tree.variables:
-                socket = interface.new_socket(
-                    name=variable, in_out="INPUT", socket_type="NodeSocketFloat"
-                )
+                socket = interface.new_socket(name=variable, in_out="INPUT", socket_type="NodeSocketFloat")
                 if variable in ASSUMABLE_CONSTANTS:
                     socket.default_value = ASSUMABLE_CONSTANTS[variable]
                 sockets[variable] = group_input.outputs[variable]
