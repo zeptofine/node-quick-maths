@@ -156,10 +156,10 @@ class ComposeNodes:
             sockets = {}
             layer = []
             for variable in tree.variables:
-                if self.socket_type == "REROUTE":
-                    node = _new_reroute(nt, name=variable)
-                elif self.socket_type == "VALUE":
+                if self.socket_type == "VALUE" or variable in ASSUMABLE_CONSTANTS:
                     node = self._new_value(nt, name=variable)
+                elif self.socket_type == "REROUTE":
+                    node = _new_reroute(nt, name=variable)
                 layer.append(node)
                 sockets[variable] = node.outputs[0]
             sublayers.append(layer)
