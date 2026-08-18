@@ -29,6 +29,7 @@ paths_exclude_pattern = [
     "__pycache__/",
     ".venv/*",
     "uv.lock",
+    "pyproject.toml",
 
     "add-on-node-quick-maths-*/",
     "node_quick_maths-*/",
