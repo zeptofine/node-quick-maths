@@ -47,13 +47,13 @@ class Operation(Generic[_InpT]):
 
     def variables(self, sort_mode="NONE") -> list[VARIABLE_NAME]:
         if sort_mode == "INSERTION":
-            v: list[VARIABLE_NAME] = []
+            v: set[VARIABLE_NAME] = set()
             for input in self.inputs:
                 if isinstance(input, Operation):
-                    v.extend(var for var in input.variables(sort_mode) if var not in v)
+                    v.update(var for var in input.variables(sort_mode))
                 elif isinstance(input, VARIABLE_NAME):
-                    v.append(input)
-            return v
+                    v.add(input)
+            return list(v)
 
         vars: set[VARIABLE_NAME] = set()
         for input in self.inputs:
