@@ -147,6 +147,10 @@ class ComposeNodes:
 
             nt = group
 
+            # Connect the nodes to the corresponding sockets
+            for variable, input in inputs:
+                nt.links.new(sockets[variable], input)
+
         else:
             node, sublayers, inputs = tree.root.generate(nt)
 
@@ -161,12 +165,12 @@ class ComposeNodes:
                 elif self.socket_type == "REROUTE":
                     node = _new_reroute(nt, name=variable)
                 layer.append(node)
-                sockets[variable] = node.outputs[0]
+                sockets[variable] = node.outputs
             sublayers.append(layer)
 
-        # Connect the nodes to the corresponding sockets
-        for variable, input in inputs:
-            nt.links.new(sockets[variable], input)
+            # Connect the nodes to the corresponding sockets
+            for variable, input in inputs:
+                nt.links.new(sockets[variable][-1], input)
 
         return sublayers
 
