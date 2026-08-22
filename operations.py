@@ -206,6 +206,9 @@ class Tree:
                 continue
             elif isinstance(inp, Operation):
                 yield from self.__nodes_and_var_connections(inp, nt, depth + 1, node.inputs[idx])
+            else:
+                node.inputs[idx].default_value = inp
+
 
     def new_group_tree(self) -> NodeTree:
         return self.creator.node_group(self.original_expression)

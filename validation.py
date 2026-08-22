@@ -72,6 +72,6 @@ def validate_node(
 
 
 def _check_bad_type(node: ast.Constant) -> Result[tuple, str]:
-    if not isinstance(node.value, int | float):
+    if isinstance(node.value, bool) or not isinstance(node.value, int | float):
         return Err(f"Constants cannot be anything other than ints or floats.\n{node.value} is disallowed")
     return Ok(())

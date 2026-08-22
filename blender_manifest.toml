@@ -33,6 +33,8 @@ paths_exclude_pattern = [
 
     "add-on-node-quick-maths-*/",
     "node_quick_maths-*/",
+    "test*",
+
 
     "/.git*",
     "/*.zip",
