@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import bpy
-from bpy.types import Node, NodeGroup, UILayout
+from bpy.types import Node, UILayout
 
 from .constants import ASSUMABLE_CONSTANTS
 from .operations import LayerList, Operation, Tree

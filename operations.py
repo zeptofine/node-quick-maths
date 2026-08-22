@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 import bpy
-from bpy.types import Node, NodeGroup, NodeSocket, NodeTree
+from bpy.types import Node, NodeSocket, NodeTree
 
-from .node_creation import NodeCreator
 from .constants import (
     SHADER_NODE_BASIC_OPS,
     VALID_MATH_FUNCTIONS,
     VARIABLE_NAME,
 )
+from .node_creation import NodeCreator
 from .rustlike_result import Err, Ok, Result
 
 ShaderMathNodeInput: TypeAlias = "int | float | str | Operation"

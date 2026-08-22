@@ -8,14 +8,11 @@ import bpy
 from bpy.types import Context, Event
 
 from . import validation as val
-from .constants import SHADER_MATH_CALLS, Function, PrintRepresent
+from .constants import SHADER_MATH_CALLS, Function
 from .node_composers import ComposeNodes
 from .node_creation import CompNodeCreator, GeoNodeCreator, NodeCreator, ShaderNodeCreator, TextureNodeCreator
-from .operations import (
-    Operation,
-    Tree,
-)
-from .rustlike_result import Err, Ok, Result
+from .operations import Tree
+from .rustlike_result import Err, Result
 
 InputSocketType = [
     ("VALUE", "Value", "Use values to connect variables."),
