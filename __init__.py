@@ -1,24 +1,18 @@
-from __future__ import annotations
+from __future__ import annotations  # noqa: N999
 
 import ast
 import traceback
+from typing import Literal, TypeAlias
 
 import bpy
 from bpy.types import Context, Event
 
+from . import validation as val
 from .constants import SHADER_MATH_CALLS, Function, PrintRepresent
-from .node_composers import (
-    ComposeCompositorMathNodes,
-    ComposeGeometryMathNodes,
-    ComposeNodes,
-    ComposeShaderMathNodes,
-    ComposeTextureMathNodes,
-)
+from .node_composers import ComposeNodes
+from .node_creation import CompNodeCreator, GeoNodeCreator, NodeCreator, ShaderNodeCreator, TextureNodeCreator
 from .operations import (
-    CompositorSimpleMathOperation,
     Operation,
-    ShaderMathOperation,
-    TextureSimpleMathOperation,
     Tree,
 )
 from .rustlike_result import Err, Ok, Result
@@ -43,6 +37,15 @@ NodeType = [
     ("MATH", "Math", "Use basic math nodes."),
     ("VECTOR", "Vector", "Use vector nodes."),
 ]
+
+
+SUPPORTED_TREE: TypeAlias = Literal["ShaderNodeTree", "GeometryNodeTree", "CompositorNodeTree", "TextureNodeTree"]
+TREE_LOOKUP: dict[SUPPORTED_TREE, NodeCreator] = {
+    "ShaderNodeTree": (ShaderNodeCreator),
+    "GeometryNodeTree": (GeoNodeCreator),
+    "CompositorNodeTree": (CompNodeCreator),
+    "TextureNodeTree": (TextureNodeCreator),
+}
 
 
 class ComposeNodeTree(bpy.types.Operator):
@@ -81,52 +84,19 @@ class ComposeNodeTree(bpy.types.Operator):
 
         return wm.invoke_props_dialog(self, confirm_text="Create", width=600)
 
-    def current_operation_type(
+    def current_creator(
         self,
-    ) -> (
-        tuple[
-            type[Operation],
-            type[ComposeNodes],
-            dict[str, dict[str, Function | PrintRepresent]],
-        ]
-        | None
-    ):
-        if self.editor_type == "ShaderNodeTree":
-            return (
-                ShaderMathOperation,
-                ComposeShaderMathNodes,
-                SHADER_MATH_CALLS,
-            )
-        if self.editor_type == "GeometryNodeTree":
-            return (
-                ShaderMathOperation,
-                ComposeGeometryMathNodes,
-                SHADER_MATH_CALLS,
-            )
-        if self.editor_type == "CompositorNodeTree":
-            return (
-                CompositorSimpleMathOperation,
-                ComposeCompositorMathNodes,
-                SHADER_MATH_CALLS,
-            )
-        if self.editor_type == "TextureNodeTree":
-            return (
-                TextureSimpleMathOperation,
-                ComposeTextureMathNodes,
-                SHADER_MATH_CALLS,
-            )
+    ) -> NodeCreator | None:
+        return TREE_LOOKUP.get(self.editor_type, None)
 
-        return None
-
-    def generate_tree(self, expression: str) -> Result[tuple[ast.Expr, Tree], str]:
-        op_type = self.current_operation_type()
-        if op_type is None:
+    def generate_tree(self, expression: str) -> Result[Tree, str]:
+        creator = self.current_creator()
+        if creator is None:
             return Err("No known operation type available")
-        op, _, _ = op_type
         try:
             mod = ast.parse(expression.strip(), mode="exec")
 
-            r = op.validate(mod)
+            r = val.validate(mod)
             if r.is_err():
                 return Err(r.unwrap_err())
 
@@ -136,47 +106,31 @@ class ComposeNodeTree(bpy.types.Operator):
             print(e)
             return Err("Could not parse expression")
 
-        try:
-            parsed = op.parse(expr)
-        except Exception as e:
-            traceback.print_exc()
-            return Err(str(e))
-        if not isinstance(parsed, Operation):
-            return Err("Parsed expression is not an Operation")
-
-        return Ok((expr, parsed.to_tree(sort_mode=self.var_sort_mode)))
+        return Tree.parse(expression, expr, creator, self.var_sort_mode)
 
     def execute(self, context: Context):
         # Create nodes from tree
-
-        bpy.ops.node.select_all(action="DESELECT")
-
         tree = self.generate_tree(self.expression)
-        o = self.current_operation_type()
-        if tree.is_err() or o is None:
+        node_creator = self.current_creator()
+        if tree.is_err() or node_creator is None:
             return {"CANCELLED"}
 
-        expr, tree = tree.unwrap()
-        _, composer_class, _ = o
+        tree = tree.unwrap()
 
-        composer = composer_class(
+        composer = ComposeNodes(
             socket_type=self.input_socket_type,
             center_nodes=self.center_nodes,
             hide_nodes=self.hide_nodes,
         )
 
-        return composer.run(expr, tree, context)
+        return composer.run(tree, context)
 
     def draw(self, context: Context):
         layout = self.layout
 
-        o = self.current_operation_type()
-
-        if o is None:
+        if self.current_creator() is None:
             layout.label(text="This node editor is currently not supported!")
             return
-
-        _, comp, calls = o
 
         layout.prop(self, "expression")
 
@@ -201,7 +155,7 @@ class ComposeNodeTree(bpy.types.Operator):
             b = functions_box.box()
             row = b.row()
 
-            for category, funcs in calls.items():
+            for category, funcs in SHADER_MATH_CALLS.items():
                 func_row = row.column(heading=category)
                 func_row.label(text=category)
                 for name, func in funcs.items():
@@ -227,12 +181,12 @@ class ComposeNodeTree(bpy.types.Operator):
             elif self.generate_previews:  # create a representation of the node tree under the settings
                 preview_box = layout.box()
 
-                composer = comp(
+                composer = ComposeNodes(
                     socket_type=self.input_socket_type,
                     center_nodes=self.center_nodes,
                     hide_nodes=self.hide_nodes,
                 )
-                composer.preview_generate(r.unwrap()[1].root, preview_box.row())
+                composer.preview(r.unwrap().root, preview_box.row())
 
 
 class Preferences(bpy.types.AddonPreferences):
@@ -315,8 +269,6 @@ def unregister():
 
     for cls in reversed(classes):
         unregister_class(cls)
-
-    registerKeymaps()
 
 
 if __name__ == "__main__":
